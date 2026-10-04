@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/date_symbol_data_local.dart';
 
 import 'core/router.dart';
+import 'core/theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -19,14 +20,9 @@ class TrainingApp extends ConsumerWidget {
     return MaterialApp.router(
       title: 'Training Planner',
       routerConfig: ref.watch(routerProvider),
-      theme: _theme(Brightness.light),
-      darkTheme: _theme(Brightness.dark),
+      debugShowCheckedModeBanner: false,
+      theme: buildTheme(Brightness.light),
+      darkTheme: buildTheme(Brightness.dark),
     );
   }
-
-  ThemeData _theme(Brightness b) => ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-            seedColor: const Color(0xFF0B6E4F), brightness: b),
-        useMaterial3: true,
-      );
 }

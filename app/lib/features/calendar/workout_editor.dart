@@ -1,14 +1,16 @@
 import 'dart:async';
+import 'dart:math' as math;
 
-import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:intl/intl.dart';
+import 'package:intl/intl.dart' hide TextDirection;
 
 import '../../core/api.dart';
 import '../../core/auth.dart';
 import '../../core/data.dart';
+import '../../core/theme.dart';
+import '../../core/ui.dart';
 import 'step_node.dart';
 
 class WorkoutEditorScreen extends ConsumerStatefulWidget {
@@ -66,7 +68,9 @@ class _WorkoutEditorScreenState extends ConsumerState<WorkoutEditorScreen> {
       final st = w['structure'] as List?;
       _steps = [for (final s in st ?? const []) StepNode.fromJson(Json.from(s as Map))];
       if (st == null) {
-        if (w['planned_duration_s'] != null) _manualMin.text = ((w['planned_duration_s'] as num) / 60).round().toString();
+        if (w['planned_duration_s'] != null) {
+          _manualMin.text = ((w['planned_duration_s'] as num) / 60).round().toString();
+        }
         if (w['planned_tss'] != null) _manualTss.text = (w['planned_tss'] as num).round().toString();
       }
       _schedulePreview();
@@ -193,150 +197,271 @@ class _WorkoutEditorScreenState extends ConsumerState<WorkoutEditorScreen> {
     final t = Theme.of(context);
     return Scaffold(
       appBar: AppBar(
-        title: Text(_isEdit ? 'Training bearbeiten' : 'Neues Training'),
+        title: Text(MediaQuery.sizeOf(context).width < 600
+            ? (_isEdit ? 'Bearbeiten' : 'Neu')
+            : (_isEdit ? 'Training bearbeiten' : 'Neues Training')),
+        leading: BackButton(onPressed: _close),
         actions: [
           if (_isEdit) ...[
-            IconButton(tooltip: 'Kopieren', onPressed: _duplicate, icon: const Icon(Icons.copy)),
-            IconButton(tooltip: 'Löschen', onPressed: _delete, icon: const Icon(Icons.delete_outline)),
+            IconButton(tooltip: 'Kopieren', onPressed: _duplicate, icon: const Icon(Icons.copy_rounded)),
+            IconButton(tooltip: 'Löschen', onPressed: _delete, icon: const Icon(Icons.delete_outline_rounded)),
           ],
-          TextButton(onPressed: _saving ? null : _save, child: const Text('Speichern')),
+          Padding(
+            padding: const EdgeInsets.only(right: Gap.md, left: Gap.xs),
+            child: FilledButton(
+              style: FilledButton.styleFrom(minimumSize: const Size(0, 40)),
+              onPressed: _saving ? null : _save,
+              child: _saving
+                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Text('Speichern'),
+            ),
+          ),
         ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _loadError != null
-              ? Center(child: Text(_loadError!))
-              : Align(
-                  alignment: Alignment.topCenter,
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 720),
-                    child: ListView(padding: const EdgeInsets.all(16), children: [
-                      TextField(controller: _title, decoration: const InputDecoration(labelText: 'Titel')),
-                      const SizedBox(height: 12),
-                      ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        leading: const Icon(Icons.event),
-                        title: Text(DateFormat('EEEE, d. MMMM yyyy', 'de').format(_date)),
+          ? Center(child: StatusMessage.error(_loadError!))
+          : PageBody(
+              maxWidth: 820,
+              children: [
+                SurfaceCard(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      TextField(
+                        controller: _title,
+                        style: t.textTheme.titleMedium,
+                        decoration: const InputDecoration(labelText: 'Titel', prefixIcon: Icon(Icons.title_rounded)),
+                      ),
+                      const SizedBox(height: Gap.md),
+                      InkWell(
+                        borderRadius: BorderRadius.circular(Radii.md),
                         onTap: () async {
                           final d = await showDatePicker(
-                              context: context, initialDate: _date, firstDate: DateTime(2000), lastDate: DateTime(2100));
+                            context: context,
+                            initialDate: _date,
+                            firstDate: DateTime(2000),
+                            lastDate: DateTime(2100),
+                          );
                           if (d != null) setState(() => _date = d);
                         },
+                        child: InputDecorator(
+                          decoration: const InputDecoration(labelText: 'Datum', prefixIcon: Icon(Icons.event_rounded)),
+                          child: Text(DateFormat('EEEE, d. MMMM yyyy', 'de').format(_date)),
+                        ),
                       ),
+                      const SizedBox(height: Gap.md),
                       TextField(
-                          controller: _desc,
-                          maxLines: 3,
-                          decoration: const InputDecoration(labelText: 'Beschreibung (optional)')),
-                      const SizedBox(height: 20),
-                      Text('Vorlage', style: t.textTheme.titleSmall),
-                      const SizedBox(height: 8),
-                      Wrap(spacing: 8, runSpacing: 8, children: [
-                        for (final e in workoutPresets().entries)
-                          ActionChip(label: Text(e.key), onPressed: () => _applyPreset(e.key, e.value)),
-                      ]),
-                      const SizedBox(height: 20),
-                      Text('Ablauf (Leistung in % der FTP)', style: t.textTheme.titleSmall),
-                      const SizedBox(height: 8),
-                      _StepList(
-                        steps: _steps,
-                        onChanged: _changed,
-                        onRemoved: (s) {
-                          _steps.remove(s);
-                          s.dispose();
-                          _changed();
-                        },
+                        controller: _desc,
+                        maxLines: 3,
+                        decoration: const InputDecoration(
+                          labelText: 'Beschreibung (optional)',
+                          alignLabelWithHint: true,
+                        ),
                       ),
-                      Wrap(spacing: 8, children: [
-                        OutlinedButton.icon(
-                            onPressed: () {
-                              _steps.add(StepNode.leaf());
-                              _changed();
-                            },
-                            icon: const Icon(Icons.add),
-                            label: const Text('Schritt')),
-                        OutlinedButton.icon(
-                            onPressed: () {
-                              _steps.add(StepNode.group(children: [
-                                StepNode.leaf(type: 'interval', minutes: 5, low: 105),
-                                StepNode.leaf(type: 'rest', minutes: 5, low: 55),
-                              ]));
-                              _changed();
-                            },
-                            icon: const Icon(Icons.repeat),
-                            label: const Text('Wiederholung')),
-                      ]),
-                      const SizedBox(height: 20),
-                      if (_steps.isEmpty) ...[
-                        Text('Ohne Ablauf kannst du Dauer und Belastung selbst schätzen:', style: t.textTheme.bodySmall),
-                        const SizedBox(height: 8),
-                        Row(children: [
-                          Expanded(
-                              child: TextField(
-                                  controller: _manualMin,
-                                  keyboardType: TextInputType.number,
-                                  decoration: const InputDecoration(labelText: 'Dauer (min)'))),
-                          const SizedBox(width: 12),
-                          Expanded(
-                              child: TextField(
-                                  controller: _manualTss,
-                                  keyboardType: TextInputType.number,
-                                  decoration: const InputDecoration(labelText: 'TSS (geschätzt)'))),
-                        ]),
-                      ] else ...[
-                        SizedBox(height: 160, child: _Preview(structure: _structure())),
-                        const SizedBox(height: 8),
-                        _SummaryLine(summary: _summary),
-                      ],
-                      if (_isEdit)
+                      if (_isEdit) ...[
+                        const SizedBox(height: Gap.sm),
                         SwitchListTile(
                           contentPadding: EdgeInsets.zero,
                           title: const Text('Ausgelassen'),
+                          subtitle: const Text('Zählt nicht mehr zur geplanten Wochenbelastung'),
                           value: _skipped,
                           onChanged: (v) => setState(() => _skipped = v),
                         ),
-                      const SizedBox(height: 24),
-                      FilledButton(
-                          onPressed: _saving ? null : _save,
-                          child: _saving
-                              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                              : const Text('Speichern')),
-                    ]),
+                      ],
+                    ],
                   ),
                 ),
+                const SizedBox(height: Gap.xl),
+                const SectionHeader(title: 'Vorlagen', subtitle: 'Antippen, um den Ablauf zu übernehmen'),
+                SizedBox(
+                  height: 92,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    children: [
+                      for (final e in workoutPresets().entries) ...[
+                        _PresetCard(name: e.key, steps: e.value, onTap: () => _applyPreset(e.key, e.value)),
+                        const SizedBox(width: Gap.sm),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(height: Gap.xl),
+                if (_steps.isNotEmpty) ...[
+                  SurfaceCard(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const SectionHeader(title: 'Profil', subtitle: 'Leistung in % der FTP, Farbe = Zone'),
+                        SizedBox(height: 170, child: _Preview(structure: _structure())),
+                        const SizedBox(height: Gap.lg),
+                        _Summary(summary: _summary),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: Gap.xl),
+                ],
+                SectionHeader(
+                  title: 'Ablauf',
+                  subtitle: 'Leistung in % der FTP',
+                  trailing: Wrap(
+                    spacing: Gap.sm,
+                    children: [
+                      OutlinedButton.icon(
+                        onPressed: () {
+                          _steps.add(StepNode.leaf());
+                          _changed();
+                        },
+                        icon: const Icon(Icons.add_rounded, size: 18),
+                        label: const Text('Schritt'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: () {
+                          _steps.add(
+                            StepNode.group(
+                              children: [
+                                StepNode.leaf(type: 'interval', minutes: 5, low: 105),
+                                StepNode.leaf(type: 'rest', minutes: 5, low: 55),
+                              ],
+                            ),
+                          );
+                          _changed();
+                        },
+                        icon: const Icon(Icons.repeat_rounded, size: 18),
+                        label: const Text('Wiederholung'),
+                      ),
+                    ],
+                  ),
+                ),
+                if (_steps.isEmpty)
+                  SurfaceCard(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text(
+                          'Ohne Ablauf kannst Du Dauer und Belastung selbst schätzen:',
+                          style: t.textTheme.bodyMedium?.copyWith(color: t.colorScheme.onSurfaceVariant),
+                        ),
+                        const SizedBox(height: Gap.md),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: _manualMin,
+                                keyboardType: TextInputType.number,
+                                decoration: const InputDecoration(
+                                  labelText: 'Dauer',
+                                  suffixText: 'min',
+                                  prefixIcon: Icon(Icons.schedule_rounded),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: Gap.md),
+                            Expanded(
+                              child: TextField(
+                                controller: _manualTss,
+                                keyboardType: TextInputType.number,
+                                decoration: const InputDecoration(
+                                  labelText: 'TSS (geschätzt)',
+                                  prefixIcon: Icon(Icons.fitness_center_rounded),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  )
+                else
+                  _StepList(
+                    steps: _steps,
+                    onChanged: _changed,
+                    onRemoved: (s) {
+                      _steps.remove(s);
+                      s.dispose();
+                      _changed();
+                    },
+                  ),
+              ],
+            ),
     );
   }
 }
 
-class _SummaryLine extends StatelessWidget {
-  const _SummaryLine({required this.summary});
+/// Vorlage als kleine Karte mit Mini-Profil.
+class _PresetCard extends StatelessWidget {
+  const _PresetCard({required this.name, required this.steps, required this.onTap});
+  final String name;
+  final List<Map<String, dynamic>> steps;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    width: 160,
+    child: SurfaceCard(
+      padding: const EdgeInsets.all(Gap.md),
+      onTap: onTap,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(name, style: Theme.of(context).textTheme.labelLarge, maxLines: 1, overflow: TextOverflow.ellipsis),
+          const SizedBox(height: Gap.sm),
+          Expanded(child: _Preview(structure: steps, mini: true)),
+        ],
+      ),
+    ),
+  );
+}
+
+class _Summary extends StatelessWidget {
+  const _Summary({required this.summary});
   final Json? summary;
 
   @override
   Widget build(BuildContext context) {
     final s = summary;
-    if (s == null) return Text('Vorschau wird berechnet …', style: Theme.of(context).textTheme.bodySmall);
-    return Text(
-      '${formatDuration(s['duration_s'] as num)} · ${(s['tss'] as num).round()} TSS · '
-      'IF ${(s['intensity_factor'] as num).toStringAsFixed(2)} · NP ${(s['np'] as num).round()} W',
-      style: Theme.of(context).textTheme.titleSmall,
+    final t = Theme.of(context);
+    if (s == null) {
+      return Text(
+        'Kennzahlen werden berechnet …',
+        style: t.textTheme.bodySmall?.copyWith(color: t.colorScheme.onSurfaceVariant),
+      );
+    }
+    final items = [
+      ('Dauer', formatDuration(s['duration_s'] as num), Icons.schedule_rounded, t.colorScheme.primary),
+      ('TSS', '${(s['tss'] as num).round()}', Icons.fitness_center_rounded, AppColors.tsb),
+      (
+        'IF',
+        (s['intensity_factor'] as num).toStringAsFixed(2),
+        Icons.speed_rounded,
+        AppColors.zoneColor((s['intensity_factor'] as num) * 100),
+      ),
+      ('NP', '${(s['np'] as num).round()} W', Icons.electric_bolt_rounded, AppColors.power),
+    ];
+    return ResponsiveGrid(
+      minItemWidth: 120,
+      spacing: Gap.sm,
+      children: [for (final i in items) MetricTile(compact: true, label: i.$1, value: i.$2, icon: i.$3, color: i.$4)],
     );
   }
 }
 
 class _StepList extends StatelessWidget {
-  const _StepList({required this.steps, required this.onChanged, required this.onRemoved, this.nested = false});
+  const _StepList({required this.steps, required this.onChanged, required this.onRemoved});
   final List<StepNode> steps;
   final VoidCallback onChanged;
   final void Function(StepNode) onRemoved;
-  final bool nested;
 
   @override
-  Widget build(BuildContext context) => Column(children: [
-        for (final s in steps)
-          s.isGroup
-              ? _GroupCard(node: s, onChanged: onChanged, onRemove: () => onRemoved(s))
-              : _LeafRow(node: s, onChanged: onChanged, onRemove: () => onRemoved(s)),
-      ]);
+  Widget build(BuildContext context) => Column(
+    children: [
+      for (final s in steps)
+        s.isGroup
+            ? _GroupCard(node: s, onChanged: onChanged, onRemove: () => onRemoved(s))
+            : _LeafRow(node: s, onChanged: onChanged, onRemove: () => onRemoved(s)),
+    ],
+  );
 }
 
 class _LeafRow extends StatelessWidget {
@@ -345,56 +470,106 @@ class _LeafRow extends StatelessWidget {
   final VoidCallback onChanged;
   final VoidCallback onRemove;
 
-  InputDecoration _dec(String label) =>
-      InputDecoration(labelText: label, isDense: true, border: const OutlineInputBorder());
+  InputDecoration _dec(String label, [String? suffix]) =>
+      InputDecoration(labelText: label, isDense: true, suffixText: suffix);
 
   @override
   Widget build(BuildContext context) {
     final num = const TextInputType.numberWithOptions(decimal: true);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(children: [
-        SizedBox(
-          width: 140,
-          child: DropdownButtonFormField<String>(
-            initialValue: node.type,
-            isExpanded: true,
-            decoration: _dec('Art'),
-            items: [for (final e in StepNode.types.entries) DropdownMenuItem(value: e.key, child: Text(e.value))],
-            onChanged: (v) {
-              if (v == null) return;
-              node.type = v;
-              onChanged();
-            },
-          ),
+    final t = Theme.of(context);
+    final lo = double.tryParse(node.low.text.replaceAll(',', '.'));
+    final hi = node.isRamp ? double.tryParse(node.high.text.replaceAll(',', '.')) : lo;
+    final color = (lo == null || hi == null) ? t.colorScheme.outline : AppColors.zoneColor((lo + hi) / 2);
+    // Abgerundeter Rahmen aussen, farbiger Zonenstreifen innen (gemischte Rahmenfarben vertragen keinen Radius)
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: t.colorScheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(Radii.md),
+        border: Border.all(color: t.colorScheme.outlineVariant),
+      ),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(Gap.md, Gap.sm, Gap.xs, Gap.sm),
+        decoration: BoxDecoration(
+          border: Border(left: BorderSide(color: color, width: 4)),
         ),
-        const SizedBox(width: 8),
-        Expanded(
-            child: TextField(
-                controller: node.dur,
-                keyboardType: num,
-                decoration: _dec('Minuten'),
-                onChanged: (_) => onChanged())),
-        const SizedBox(width: 8),
-        Expanded(
-            child: TextField(
-                controller: node.low,
-                keyboardType: num,
-                decoration: _dec(node.isRamp ? 'von %' : '% FTP'),
-                onChanged: (_) => onChanged())),
-        if (node.isRamp) ...[
-          const SizedBox(width: 8),
-          Expanded(
-              child: TextField(
-                  controller: node.high,
-                  keyboardType: num,
-                  decoration: _dec('bis %'),
-                  onChanged: (_) => onChanged())),
-        ],
-        IconButton(tooltip: 'Entfernen', onPressed: onRemove, icon: const Icon(Icons.close)),
-      ]),
+        child: LayoutBuilder(
+          builder: (context, c) {
+            final type = DropdownButtonFormField<String>(
+              initialValue: node.type,
+              isExpanded: true,
+              decoration: _dec('Art'),
+              items: [for (final e in StepNode.types.entries) DropdownMenuItem(value: e.key, child: Text(e.value))],
+              onChanged: (v) {
+                if (v == null) return;
+                node.type = v;
+                onChanged();
+              },
+            );
+            final remove = IconButton(tooltip: 'Entfernen', onPressed: onRemove, icon: const Icon(Icons.close_rounded));
+            final values = _values(num);
+            if (c.maxWidth < 480) {
+              return Column(
+                children: [
+                  Row(
+                    children: [
+                      Expanded(child: type),
+                      remove,
+                    ],
+                  ),
+                  const SizedBox(height: Gap.sm),
+                  Padding(
+                    padding: const EdgeInsets.only(right: Gap.sm),
+                    child: Row(children: values),
+                  ),
+                ],
+              );
+            }
+            return Row(
+              children: [
+                SizedBox(width: 150, child: type),
+                const SizedBox(width: Gap.sm),
+                ...values,
+                remove,
+              ],
+            );
+          },
+        ),
+      ),
     );
   }
+
+  List<Widget> _values(TextInputType num) => [
+    Expanded(
+      child: TextField(
+        controller: node.dur,
+        keyboardType: num,
+        decoration: _dec('Dauer', 'min'),
+        onChanged: (_) => onChanged(),
+      ),
+    ),
+    const SizedBox(width: Gap.sm),
+    Expanded(
+      child: TextField(
+        controller: node.low,
+        keyboardType: num,
+        decoration: _dec(node.isRamp ? 'von' : 'Leistung', '%'),
+        onChanged: (_) => onChanged(),
+      ),
+    ),
+    if (node.isRamp) ...[
+      const SizedBox(width: Gap.sm),
+      Expanded(
+        child: TextField(
+          controller: node.high,
+          keyboardType: num,
+          decoration: _dec('bis', '%'),
+          onChanged: (_) => onChanged(),
+        ),
+      ),
+    ],
+  ];
 }
 
 class _GroupCard extends StatelessWidget {
@@ -405,32 +580,41 @@ class _GroupCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
+    final t = Theme.of(context);
+    return Container(
       margin: const EdgeInsets.symmetric(vertical: 6),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Row(children: [
-            const Icon(Icons.repeat),
-            const SizedBox(width: 8),
-            const Text('Wiederholen'),
-            const SizedBox(width: 12),
-            SizedBox(
-              width: 70,
-              child: TextField(
-                controller: node.count,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(isDense: true, border: OutlineInputBorder(), suffixText: '×'),
-                onChanged: (_) => onChanged(),
+      padding: const EdgeInsets.all(Gap.md),
+      decoration: BoxDecoration(
+        color: t.colorScheme.primary.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(Radii.lg),
+        border: Border.all(color: t.colorScheme.primary.withValues(alpha: 0.25)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.repeat_rounded, color: t.colorScheme.primary),
+              const SizedBox(width: Gap.sm),
+              Text('Wiederholen', style: t.textTheme.titleSmall),
+              const SizedBox(width: Gap.md),
+              SizedBox(
+                width: 80,
+                child: TextField(
+                  controller: node.count,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(isDense: true, suffixText: '×'),
+                  onChanged: (_) => onChanged(),
+                ),
               ),
-            ),
-            const Spacer(),
-            IconButton(tooltip: 'Gruppe entfernen', onPressed: onRemove, icon: const Icon(Icons.close)),
-          ]),
+              const Spacer(),
+              IconButton(tooltip: 'Gruppe entfernen', onPressed: onRemove, icon: const Icon(Icons.close_rounded)),
+            ],
+          ),
+          const SizedBox(height: Gap.xs),
           _StepList(
             steps: node.children,
             onChanged: onChanged,
-            nested: true,
             onRemoved: (s) {
               node.children.remove(s);
               s.dispose();
@@ -444,92 +628,153 @@ class _GroupCard extends StatelessWidget {
                 node.children.add(StepNode.leaf());
                 onChanged();
               },
-              icon: const Icon(Icons.add),
+              icon: const Icon(Icons.add_rounded),
               label: const Text('Schritt in Gruppe'),
             ),
           ),
-        ]),
+        ],
       ),
     );
   }
 }
 
-/// Treppenprofil des Workouts (Zeit in Minuten, Leistung in % FTP).
-class _Preview extends StatelessWidget {
-  const _Preview({required this.structure});
-  final List<Map<String, dynamic>>? structure;
+/// Ein Abschnitt des Profils: Start, Dauer (s) und Leistung am Anfang/Ende (% FTP).
+typedef _Seg = (double start, double secs, double from, double to);
 
-  List<FlSpot> _spots() {
-    final spots = <FlSpot>[];
-    var t = 0.0;
-    void leaf(Map<String, dynamic> l) {
-      final secs = (l['duration_s'] as num).toDouble();
-      final p = (l['power_pct'] as List).cast<num>();
-      final ramp = l['type'] == 'warmup' || l['type'] == 'cooldown';
-      final a = ramp ? p[0].toDouble() : (p[0] + p[1]) / 2;
-      final b = ramp ? p[1].toDouble() : a;
-      spots
-        ..add(FlSpot(t / 60, a))
-        ..add(FlSpot((t + secs) / 60, b));
-      t += secs;
-    }
-
-    for (final s in structure ?? const []) {
-      if (s['type'] == 'repeat') {
-        for (var i = 0; i < (s['count'] as num); i++) {
-          for (final l in s['steps'] as List) {
-            leaf(Map<String, dynamic>.from(l as Map));
-          }
-        }
-      } else {
-        leaf(s);
-      }
-    }
-    return spots;
+List<_Seg> _segments(List<Map<String, dynamic>> structure) {
+  final out = <_Seg>[];
+  var t = 0.0;
+  void leaf(Map<String, dynamic> l) {
+    final secs = (l['duration_s'] as num).toDouble();
+    final p = (l['power_pct'] as List).cast<num>();
+    final ramp = l['type'] == 'warmup' || l['type'] == 'cooldown';
+    final a = ramp ? p[0].toDouble() : (p[0] + p[1]) / 2;
+    final b = ramp ? p[1].toDouble() : a;
+    out.add((t, secs, a.toDouble(), b.toDouble()));
+    t += secs;
   }
+
+  for (final s in structure) {
+    if (s['type'] == 'repeat') {
+      for (var i = 0; i < (s['count'] as num); i++) {
+        for (final l in s['steps'] as List) {
+          leaf(Map<String, dynamic>.from(l as Map));
+        }
+      }
+    } else {
+      leaf(s);
+    }
+  }
+  return out;
+}
+
+/// Blockprofil des Workouts; jede Stufe in der Farbe ihrer Leistungszone.
+class _Preview extends StatelessWidget {
+  const _Preview({required this.structure, this.mini = false});
+  final List<Map<String, dynamic>>? structure;
+  final bool mini;
 
   @override
   Widget build(BuildContext context) {
+    final t = Theme.of(context);
     if (structure == null || structure!.isEmpty) {
-      return const Center(child: Text('Ungültige Eingabe, bitte Schritte prüfen.'));
+      return Center(
+        child: Text(
+          'Ungültige Eingabe, bitte Schritte prüfen.',
+          style: t.textTheme.bodySmall?.copyWith(color: t.colorScheme.error),
+        ),
+      );
     }
-    final c = Theme.of(context).colorScheme.primary;
-    return LineChart(LineChartData(
-      minY: 0,
-      lineBarsData: [
-        LineChartBarData(
-          spots: _spots(),
-          color: c,
-          barWidth: 2,
-          dotData: const FlDotData(show: false),
-          belowBarData: BarAreaData(show: true, color: c.withValues(alpha: 0.25)),
+    final segs = _segments(structure!);
+    final total = segs.isEmpty ? 0.0 : segs.last.$1 + segs.last.$2;
+    final painter = _ProfilePainter(
+      segs: segs,
+      grid: t.colorScheme.outlineVariant,
+      ftpLine: t.colorScheme.onSurfaceVariant,
+      mini: mini,
+    );
+    if (mini) return CustomPaint(painter: painter, size: Size.infinite);
+    final axis = t.textTheme.labelSmall?.copyWith(color: t.colorScheme.onSurfaceVariant);
+    return Column(
+      children: [
+        Expanded(
+          child: CustomPaint(painter: painter, size: Size.infinite),
+        ),
+        const SizedBox(height: 6),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text('0′', style: axis),
+            Text(formatDuration(total / 2), style: axis),
+            Text(formatDuration(total), style: axis),
+          ],
         ),
       ],
-      gridData: const FlGridData(drawVerticalLine: false),
-      borderData: FlBorderData(show: false),
-      lineTouchData: const LineTouchData(enabled: false),
-      titlesData: FlTitlesData(
-        topTitles: const AxisTitles(),
-        rightTitles: const AxisTitles(),
-        leftTitles: AxisTitles(
-          sideTitles: SideTitles(
-            showTitles: true,
-            reservedSize: 40,
-            getTitlesWidget: (v, meta) => v == meta.max
-                ? const SizedBox.shrink()
-                : Text('${v.round()}%', style: Theme.of(context).textTheme.labelSmall),
-          ),
-        ),
-        bottomTitles: AxisTitles(
-          sideTitles: SideTitles(
-            showTitles: true,
-            reservedSize: 22,
-            getTitlesWidget: (v, meta) => v == meta.max
-                ? const SizedBox.shrink()
-                : Text('${v.round()}′', style: Theme.of(context).textTheme.labelSmall),
-          ),
-        ),
-      ),
-    ));
+    );
   }
+}
+
+class _ProfilePainter extends CustomPainter {
+  _ProfilePainter({required this.segs, required this.grid, required this.ftpLine, required this.mini});
+  final List<_Seg> segs;
+  final Color grid;
+  final Color ftpLine;
+  final bool mini;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (segs.isEmpty || size.width <= 0) return;
+    final total = segs.last.$1 + segs.last.$2;
+    final peak = segs.map((s) => math.max(s.$3, s.$4)).reduce(math.max);
+    final maxY = math.max(mini ? 120.0 : 130.0, peak * 1.1);
+    double x(double secs) => secs / total * size.width;
+    double y(double pct) => size.height - pct / maxY * size.height;
+
+    if (!mini) {
+      final gp = Paint()
+        ..color = grid
+        ..strokeWidth = 1;
+      for (final pct in [50, 100, 150, 200]) {
+        if (pct > maxY) break;
+        canvas.drawLine(Offset(0, y(pct.toDouble())), Offset(size.width, y(pct.toDouble())), gp);
+      }
+    }
+
+    final gap = mini ? 0.0 : math.min(1.5, size.width / segs.length * 0.15);
+    for (final s in segs) {
+      final l = x(s.$1) + gap / 2, r = x(s.$1 + s.$2) - gap / 2;
+      if (r <= l) continue;
+      final path = Path()
+        ..moveTo(l, size.height)
+        ..lineTo(l, y(s.$3))
+        ..lineTo(r, y(s.$4))
+        ..lineTo(r, size.height)
+        ..close();
+      final c = AppColors.zoneColor((s.$3 + s.$4) / 2);
+      canvas.drawPath(path, Paint()..color = c.withValues(alpha: mini ? 0.9 : 0.85));
+    }
+
+    if (!mini) {
+      // FTP-Linie bei 100 %
+      final fy = y(100);
+      final dash = Paint()
+        ..color = ftpLine.withValues(alpha: 0.7)
+        ..strokeWidth = 1.2;
+      for (var dx = 0.0; dx < size.width; dx += 9) {
+        canvas.drawLine(Offset(dx, fy), Offset(math.min(dx + 5, size.width), fy), dash);
+      }
+      final tp = TextPainter(
+        text: TextSpan(
+          text: 'FTP',
+          style: TextStyle(color: ftpLine, fontSize: 10, fontWeight: FontWeight.w700),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      tp.paint(canvas, Offset(size.width - tp.width, fy - tp.height - 2));
+    }
+  }
+
+  @override
+  bool shouldRepaint(_ProfilePainter old) =>
+      old.segs != segs || old.grid != grid || old.ftpLine != ftpLine || old.mini != mini;
 }

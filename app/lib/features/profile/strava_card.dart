@@ -6,6 +6,8 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/api.dart';
 import '../../core/auth.dart';
 import '../../core/data.dart';
+import '../../core/theme.dart';
+import '../../core/ui.dart';
 
 class StravaCard extends ConsumerStatefulWidget {
   const StravaCard({super.key});
@@ -96,69 +98,77 @@ class _StravaCardState extends ConsumerState<StravaCard>
   Widget build(BuildContext context) {
     final status = ref.watch(stravaStatusProvider);
     final t = Theme.of(context);
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: status.when(
-          loading: () => const Center(child: CircularProgressIndicator()),
-          error: (e, _) => Text(errorMessage(e)),
-          data: (s) {
-            final connected = s['connected'] == true;
-            return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    final muted = t.textTheme.bodySmall?.copyWith(color: t.colorScheme.onSurfaceVariant);
+    return SurfaceCard(
+      child: status.when(
+        loading: () => const SizedBox(height: 80, child: Center(child: CircularProgressIndicator())),
+        error: (e, _) => Text(errorMessage(e)),
+        data: (s) {
+          final connected = s['connected'] == true;
+          return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Row(children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(color: AppColors.strava, borderRadius: BorderRadius.circular(Radii.md)),
+                child: const Icon(Icons.sync_alt_rounded, color: Colors.white, size: 20),
+              ),
+              const SizedBox(width: Gap.md),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('Strava', style: t.textTheme.titleMedium),
+                  Text(
+                    connected ? '${s['activity_count']} Aktivitäten importiert' : 'Aktivitäten automatisch importieren',
+                    style: muted,
+                  ),
+                ]),
+              ),
+              Pill(
+                label: connected ? 'Verbunden' : 'Getrennt',
+                color: connected ? AppColors.completed : t.colorScheme.outline,
+                icon: connected ? Icons.check_circle_rounded : Icons.link_off_rounded,
+              ),
+            ]),
+            const SizedBox(height: Gap.lg),
+            if (s['configured'] != true) ...[
+              const Text('Auf dem Server fehlen STRAVA_CLIENT_ID und STRAVA_CLIENT_SECRET (backend/.env).'),
+              const SizedBox(height: Gap.sm),
+              Text('Callback-Domain bei Strava: ${Uri.parse(s['redirect_uri'] as String).host}', style: muted),
+            ] else if (!connected) ...[
+              FilledButton.icon(
+                style: FilledButton.styleFrom(backgroundColor: AppColors.strava, foregroundColor: Colors.white),
+                onPressed: _busy ? null : _connect,
+                icon: const Icon(Icons.link_rounded),
+                label: const Text('Mit Strava verbinden'),
+              ),
+              const SizedBox(height: Gap.sm),
+              Text('Der Browser öffnet sich. Danach kehrst Du hierher zurück.', style: muted, textAlign: TextAlign.center),
+            ] else ...[
+              FilledButton.icon(
+                onPressed: _busy ? null : () => _sync(),
+                icon: _busy
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.refresh_rounded),
+                label: const Text('Jetzt synchronisieren'),
+              ),
+              const SizedBox(height: Gap.sm),
               Row(children: [
-                const Icon(Icons.sync_alt),
-                const SizedBox(width: 8),
-                Text('Strava', style: t.textTheme.titleMedium),
-                const Spacer(),
-                if (connected)
-                  Chip(
-                    label: Text('${s['activity_count']} Aktivitäten'),
-                    visualDensity: VisualDensity.compact,
-                  ),
-              ]),
-              const SizedBox(height: 8),
-              if (s['configured'] != true) ...[
-                const Text(
-                    'Auf dem Server fehlen STRAVA_CLIENT_ID und STRAVA_CLIENT_SECRET (backend/.env).'),
-                const SizedBox(height: 8),
-                Text('Callback-Domain bei Strava: ${Uri.parse(s['redirect_uri'] as String).host}',
-                    style: t.textTheme.bodySmall),
-              ] else if (!connected) ...[
-                const Text(
-                    'Verbinde Strava, um deine bisherigen Fahrten automatisch zu importieren.'),
-                const SizedBox(height: 12),
-                FilledButton.icon(
-                  onPressed: _busy ? null : _connect,
-                  icon: const Icon(Icons.link),
-                  label: const Text('Mit Strava verbinden'),
-                ),
-                const SizedBox(height: 4),
-                Text('Der Browser öffnet sich. Danach kehrst du hierher zurück.',
-                    style: t.textTheme.bodySmall),
-              ] else ...[
-                Wrap(spacing: 8, runSpacing: 8, children: [
-                  FilledButton.icon(
-                    onPressed: _busy ? null : () => _sync(),
-                    icon: _busy
-                        ? const SizedBox(
-                            width: 16, height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Icon(Icons.refresh),
-                    label: const Text('Jetzt synchronisieren'),
-                  ),
-                  OutlinedButton(
+                Expanded(
+                  child: OutlinedButton(
                     onPressed: _busy ? null : () => _sync(full: true),
                     child: const Text('Alles neu laden'),
                   ),
-                  TextButton(
-                    onPressed: _busy ? null : _disconnect,
-                    child: const Text('Trennen'),
-                  ),
-                ]),
-              ],
-            ]);
-          },
-        ),
+                ),
+                const SizedBox(width: Gap.sm),
+                TextButton(
+                  style: TextButton.styleFrom(foregroundColor: t.colorScheme.error),
+                  onPressed: _busy ? null : _disconnect,
+                  child: const Text('Trennen'),
+                ),
+              ]),
+            ],
+          ]);
+        },
       ),
     );
   }

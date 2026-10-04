@@ -16,6 +16,7 @@ import anthropic
 from sqlalchemy.orm import Session
 
 from .. import atp as A
+from .. import knowledge as K
 from ..config import get_settings
 from ..metrics.fitness import current_status, pmc_rows, weekly_summary
 from ..models import User
@@ -53,6 +54,15 @@ Du hast ein dauerhaftes Gedaechtnis ueber den Athleten (save_memory, forget_memo
 - Stehen im bisherigen Gespraech Fakten, die noch nicht im Gedaechtnis sind, speichere sie jetzt.
 - Nutze das Gedaechtnis aktiv und widersprich ihm nicht: Plane und berate im Einklang damit (in der Offseason z. B. keine harten Intervalle vorschlagen, wenn das so besprochen ist). Sag dem Athleten in einem Halbsatz, was Du Dir gemerkt hast.
 
+# Evidenz und Wissensbasis
+Unten steht ein Index geprueft erfasster Wissenskarten (Slug | Titel | Thema | Evidenzstufe). Sie stammen aus Studien, die der Betreiber ausgewertet und freigegeben hat.
+- Bei Entscheidungen mit echten Alternativen (Intervallformat, Intensitaetsverteilung, Tapering, Ernaehrung, Hitze, Hoehe, Kraft, Zyklus, Masters) und wenn der Athlet wissen will, warum, rufst Du zuerst get_knowledge auf. Bei Routineantworten ohne Alternativen nicht.
+- Belege nur aus Karten, die Du in dieser Unterhaltung gelesen hast. Markiere eine belegte Aussage mit [[kb:slug]] direkt dahinter. Erfinde nie Quellen, Autoren, Jahre oder Zahlen. Ohne Karte sag klar, dass es Praxiswissen oder eine Konvention ist und keine geprueften Studien dahinterstehen.
+- Benenne die Staerke ehrlich in Alltagssprache: A starke, B moderate, C schwache Evidenz (kleine oder beobachtende Studien), D Expertenpraxis. Beachte directness und applies_to: Passt die Studienpopulation nicht zum Athleten (Leistungsstufe, Geschlecht, Alter, siehe Gedaechtnis), sag das.
+- Bei status contested gib beide Positionen wieder und entscheide anhand der Daten und Vorlieben des Athleten. Individuelle Daten und Erfahrungen des Athleten gehen vor Durchschnittswerten aus Studien.
+- Bei safety=true (z. B. Energiemangel, Ernaehrung, Zyklus) nenne die Karte, verweise bei Hinweisen auf ein Problem aber an Arzt, Aerztin oder Sportmedizin und stelle keine Diagnosen.
+- Die Zahlen in den Abschnitten Saisonplan und Trainingsregeln sind Praxisregeln (Coggan/TrainingPeaks), keine belegten Studienergebnisse. Nenne sie so, solange keine Wissenskarte sie belegt.
+
 # Saisonplan (ATP)
 Fuer Athleten, die auf Events hinarbeiten, pflegst Du einen Saisonplan wie in TrainingPeaks: Events mit Prioritaet (A, B, C) und Wochenziele je Trainingsphase (get_season_plan, set_season_plan_weeks, save_season_event, delete_season_event). Er steht im Kontext unten und im Kalender der App.
 - Grundlage: Frage zuerst knapp nach Events mit Datum und Prioritaet (A = ein bis drei Hauptziele der Saison), verfuegbarer Zeit je Woche und dem Trainingsbeginn, falls das fehlt. Nennt der Athlet ein Event, trage es ohne Rueckfrage ein (save_season_event).
@@ -68,7 +78,7 @@ Der CTL soll im Aufbau um etwa 3-6 Punkte pro Woche steigen, selten mehr. Als Re
 - Eine Woche hat mindestens 1 Ruhetag und hoechstens 2-3 intensive Einheiten (Schwelle und darueber), nie zwei harte Tage direkt nacheinander. \
 Der Rest ist Grundlage (Z2). Halte die genannte Verfuegbarkeit ein.
 - Vor einem wichtigen Event nimmst Du die Last in den letzten 7-14 Tagen zurueck (Tapering), die Intensitaet bleibt, das Volumen sinkt.
-- TSB: etwa -10 bis -30 im Aufbau ist normal; unter -30 droht Ueberlastung, dann Last senken. Form fuer ein Event: etwa +5 bis +20.
+- TSB: etwa -10 bis -30 im Aufbau ist normal; unter -30 droht Ueberlastung, dann Last senken. Form fuer ein Event: etwa +5 bis +25.
 - Trainings legst Du nur ab heute an. Du loeschst oder aenderst nichts ohne Anlass und aenderst keine absolvierten Trainings.
 
 # Struktur eines Trainings
@@ -116,6 +126,12 @@ def build_context(db: Session, user: User, today: dt.date | None = None) -> str:
     return "\n".join(lines)
 
 
+def build_system_prompt(db: Session) -> str:
+    """Statischer Prompt plus Titel-Index der Wissenskarten (aendert sich nur, wenn die Wissensbasis sich aendert)."""
+    index = K.index_lines(db) or ["- noch keine Karten: kennzeichne Aussagen als Praxiswissen ohne geprueften Beleg"]
+    return SYSTEM_PROMPT + "\n\n# Wissensbasis (Index)\n" + "\n".join(index)
+
+
 def _client(settings=None) -> anthropic.Anthropic:
     s = settings or get_settings()
     if not s.anthropic_api_key:
@@ -150,11 +166,12 @@ def run_coach(
     settings = get_settings()
     client = client or _client(settings)
     system = [
-        {"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}},
+        {"type": "text", "text": build_system_prompt(db), "cache_control": {"type": "ephemeral"}},
         {"type": "text", "text": build_context(db, user)},
     ]
     messages: list[dict] = [*history, {"role": "user", "content": text}]
     actions: list[str] = []
+    consulted: dict[str, bool] = {}  # im Turn tatsaechlich gelesene Wissenskarten (Slug)
     use_fallback = settings.coach_refusal_fallback
     final = None
 
@@ -185,7 +202,7 @@ def run_coach(
 
         if final.stop_reason == "refusal":
             return {"text": "Dazu kann ich Dir leider nicht helfen. Formuliere die Frage gern anders.",
-                    "actions": actions, "model": model}
+                    "actions": actions, "model": model, "sources": []}
 
         # Antwort unveraendert (inkl. Thinking-Bloecke) in den Verlauf dieser Anfrage uebernehmen
         messages.append({"role": "assistant", "content": final.content})
@@ -204,6 +221,8 @@ def run_coach(
                 if not isinstance(block.input, dict):
                     raise T.ToolError("Eingabe muss ein JSON-Objekt sein")
                 result = handler(db, user, block.input)
+                if block.name == "get_knowledge":
+                    consulted.update({c["slug"]: True for c in result["cards"]})
                 if block.name in T.WRITE_TOOLS:
                     actions.append(T.action_summary(block.name, block.input, result))
                 results.append({"type": "tool_result", "tool_use_id": block.id,
@@ -227,4 +246,9 @@ def run_coach(
         answer = "Ich konnte die Anfrage nicht abschliessen. Bitte versuche es noch einmal."
         if actions:
             answer += " Bereits ausgefuehrt: " + "; ".join(actions) + "."
-    return {"text": answer, "actions": actions, "model": model}
+    # Zitat-Integritaet: Nur gelesene Karten duerfen zitiert werden; [[kb:...]] verschwindet aus dem Text,
+    # angezeigt wird, was es in der Wissensbasis wirklich gibt, mit Beschriftungen aus den Kartenfeldern.
+    answer, tagged = K.process_citations(answer, set(consulted))
+    cards = {c.slug: c for c in K.active_cards(db)}
+    order = [s for s in tagged if s in cards] + [s for s in consulted if s not in tagged and s in cards]
+    return {"text": answer, "actions": actions, "model": model, "sources": [K.chip_view(cards[s], s in tagged) for s in order]}

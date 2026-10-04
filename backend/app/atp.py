@@ -31,6 +31,7 @@ MAX_TSS = 3000
 MAX_HOURS = 60
 PAST_DAYS = 400  # so weit zurueck und
 FUTURE_DAYS = 800  # so weit voraus darf geplant werden
+# Die folgenden Grenzen sind Praxisregeln (Coggan/TrainingPeaks), keine belegten Studienergebnisse.
 RAMP_WARN = 8.0  # CTL-Zuwachs pro Woche, ab dem gewarnt wird
 JUMP_WARN = 1.3  # Wochenziel mehr als 30 % ueber der Vorwoche
 FORM_RANGE = (5, 25)  # empfohlene Form (TSB) am A-Event

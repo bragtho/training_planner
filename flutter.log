@@ -1,0 +1,21 @@
+﻿Launching lib\main.dart on Web Server in release mode...
+flutter : The --pwa-strategy option is deprecated and will be removed in a future Flutter release.
+In Zeile:1 Zeichen:362
++ ... lanner\app; flutter run -d web-server --web-port 8080 --release 2>&1  ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (The --pwa-strat...lutter release.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+For more information, see: https://github.com/flutter/flutter/issues/156910
+Compiling lib\main.dart for the Web...                             93.7s
+√ Built build\web
+lib\main.dart is being served at http://localhost:8080
+The web-server device requires the Dart Debug Chrome extension for debugging. Consider using the Chrome or Edge devices for an improved development workflow.
+
+Flutter run key commands.
+r Hot reload. 
+h List all available interactive commands.
+d Detach (terminate "flutter run" but leave application running).
+c Clear the screen
+q Quit (terminate the application on the device).
+

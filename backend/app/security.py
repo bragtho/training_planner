@@ -28,6 +28,22 @@ def create_token(user_id: int) -> str:
     return jwt.encode({"sub": str(user_id), "exp": exp}, s.jwt_secret, algorithm="HS256")
 
 
+def create_state_token(user_id: int, purpose: str, minutes: int = 10) -> str:
+    """Kurzlebiger, signierter Wert fuer den OAuth-`state` (ordnet den Callback dem Nutzer zu)."""
+    exp = datetime.now(timezone.utc) + timedelta(minutes=minutes)
+    return jwt.encode(
+        {"sub": str(user_id), "purpose": purpose, "exp": exp}, get_settings().jwt_secret, algorithm="HS256"
+    )
+
+
+def read_state_token(token: str, purpose: str) -> int | None:
+    try:
+        data = jwt.decode(token, get_settings().jwt_secret, algorithms=["HS256"])
+    except jwt.PyJWTError:
+        return None
+    return int(data["sub"]) if data.get("purpose") == purpose else None
+
+
 def current_user(
     cred: HTTPAuthorizationCredentials | None = Depends(_bearer), db: Session = Depends(get_db)
 ) -> User:
@@ -36,6 +52,8 @@ def current_user(
     try:
         data = jwt.decode(cred.credentials, get_settings().jwt_secret, algorithms=["HS256"])
     except jwt.PyJWTError:
+        raise HTTPException(401, "Token ungueltig")
+    if data.get("purpose"):  # zweckgebundene Tokens (z. B. OAuth-state) sind kein Login
         raise HTTPException(401, "Token ungueltig")
     user = db.get(User, int(data["sub"]))
     if user is None:

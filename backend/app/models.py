@@ -83,7 +83,7 @@ class PlannedWorkout(Base):
     date: Mapped[date] = mapped_column(Date, index=True)
     title: Mapped[str] = mapped_column(String(255))
     description: Mapped[str | None] = mapped_column(Text)
-    # [{"type":"warmup|interval|rest|cooldown|steady","duration_s":600,"power_pct_ftp":[55,75],"repeat":1}, ...]
+    # Format siehe app/metrics/workout.py (Schritte und Wiederholungsgruppen in % FTP)
     structure: Mapped[list | None] = mapped_column(JSON)
     planned_tss: Mapped[float | None] = mapped_column(Float)
     planned_duration_s: Mapped[int | None] = mapped_column(Integer)

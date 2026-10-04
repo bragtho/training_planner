@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     coach_chat_model: str = "claude-sonnet-5-5"
     coach_planning_model: str = "claude-opus-5-5"
+    # Bei Ablehnung durch die Sicherheitsfilter uebernimmt serverseitig ein Ersatzmodell
+    coach_refusal_fallback: bool = True
+    coach_daily_message_limit: int = 100
 
     public_base_url: str = "http://localhost:8000"
 

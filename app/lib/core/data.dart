@@ -122,3 +122,9 @@ int isoWeek(DateTime d) {
   final firstJan = DateTime.utc(thursday.year, 1, 1);
   return (thursday.difference(firstJan).inDays / 7).floor() + 1;
 }
+
+/// Wissenskarte fuer das Quellen-Sheet im Chat (Empfehlung, Evidenz, Grenzen, Quellen).
+final knowledgeCardProvider = FutureProvider.autoDispose.family<Json, String>((ref, slug) async {
+  final r = await ref.watch(apiProvider).dio.get('/knowledge/cards/$slug');
+  return Json.from(r.data as Map);
+});

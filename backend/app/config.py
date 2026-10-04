@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     # Bei Ablehnung durch die Sicherheitsfilter uebernimmt serverseitig ein Ersatzmodell
     coach_refusal_fallback: bool = True
     coach_daily_message_limit: int = 100
+    # Schluessel fuer die Verwaltungs-Schnittstelle der Wissensbasis (Wissens-Manager); leer = Schnittstelle gesperrt
+    knowledge_admin_token: str = ""
 
     public_base_url: str = "http://localhost:8000"
 

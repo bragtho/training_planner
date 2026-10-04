@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .db import Base, engine
-from .routers import activities, atp, auth, coach, plans, profile, strava
+from .routers import activities, atp, auth, coach, knowledge, plans, profile, strava
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -25,6 +25,7 @@ app.include_router(activities.router)
 app.include_router(plans.router)
 app.include_router(coach.router)
 app.include_router(atp.router)
+app.include_router(knowledge.router)
 
 
 @app.get("/health")

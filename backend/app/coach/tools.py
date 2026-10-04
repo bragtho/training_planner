@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from ..metrics.fitness import current_status, pmc_rows, weekly_summary
 from ..metrics.power import power_zones
 from .. import atp as A
+from .. import knowledge as K
 from ..models import Activity, AtpWeek, CoachMemory, PlannedWorkout, User
 from ..routers.plans import WorkoutIn, _apply, calendar_data
 
@@ -223,6 +224,20 @@ TOOLS: list[dict] = [
         "name": "delete_season_event",
         "description": "Loescht ein Event aus dem Saisonplan (Absage, Fehleintrag oder auf Wunsch des Athleten).",
         "input_schema": {"type": "object", "properties": {"id": {"type": "integer"}}, "required": ["id"]},
+    },
+    {
+        "name": "get_knowledge",
+        "description": "Liest geprueft Wissenskarten (Studienlage, Evidenzstufe A-D, Direktheit, Gueltigkeitsbereich, Grenzen, Quellen) aus der "
+                       "Wissensbasis. Der Index mit den verfuegbaren Karten steht im Systemprompt. Rufe es bei Entscheidungen mit echten "
+                       "Alternativen und bei Warum-Fragen auf, bevor Du Studienlage behauptest. Gib entweder ids (Slugs aus dem Index) oder "
+                       "ein topic an.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "ids": {"type": "array", "items": {"type": "string"}, "maxItems": 6, "description": "Slugs aus dem Index, hoechstens 6"},
+                "topic": {"type": "string", "enum": list(K.TOPICS), "description": "Alle Karten eines Themas"},
+            },
+        },
     },
     {
         "name": "forget_memory",
@@ -550,6 +565,17 @@ def delete_season_event(db: Session, user: User, args: dict) -> dict:
     return {"deleted": _atp_call(A.delete_event, db, user.id, args.get("id"))}
 
 
+def get_knowledge(db: Session, user: User, args: dict) -> dict:
+    ids, topic = args.get("ids"), args.get("topic")
+    if ids is not None and (not isinstance(ids, list) or any(not isinstance(i, str) for i in ids)):
+        raise ToolError("ids muss eine Liste von Texten (Slugs) sein")
+    if topic is not None and topic not in K.TOPICS:
+        raise ToolError(f"topic muss eines von {', '.join(K.TOPICS)} sein")
+    if not ids and not topic:
+        raise ToolError("ids oder topic angeben (siehe Index der Wissenskarten im Systemprompt)")
+    return K.cards_for_tool(db, ids, topic)
+
+
 HANDLERS = {
     "get_athlete_profile": get_athlete_profile,
     "get_fitness_status": get_fitness_status,
@@ -566,6 +592,7 @@ HANDLERS = {
     "clear_season_plan_weeks": clear_season_plan_weeks,
     "save_season_event": save_season_event,
     "delete_season_event": delete_season_event,
+    "get_knowledge": get_knowledge,
 }
 
 # Tools, die etwas veraendern (fuer die Aktionsliste in der App)

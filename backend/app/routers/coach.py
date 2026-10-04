@@ -55,6 +55,7 @@ class MessageOut(BaseModel):
     role: str
     text: str
     actions: list[str] = []
+    sources: list[dict] = []
     model: str | None = None
     created_at: dt.datetime
 
@@ -62,7 +63,7 @@ class MessageOut(BaseModel):
 def _out(m: CoachMessage) -> MessageOut:
     c = m.content if isinstance(m.content, dict) else {"text": str(m.content)}
     created = m.created_at if m.created_at.tzinfo else m.created_at.replace(tzinfo=dt.timezone.utc)
-    return MessageOut(id=m.id, role=m.role, text=c.get("text", ""), actions=c.get("actions", []),
+    return MessageOut(id=m.id, role=m.role, text=c.get("text", ""), actions=c.get("actions", []), sources=c.get("sources", []),
                       model=c.get("model"), created_at=created)
 
 
@@ -106,7 +107,8 @@ def _run(db: Session, user: User, text: str, model: str, effort: str) -> list[Me
         # Erst nach Erfolg speichern, damit fehlgeschlagene Anfragen keine halben Verlaeufe hinterlassen
         um = CoachMessage(user_id=user.id, role="user", content={"text": text})
         am = CoachMessage(user_id=user.id, role="assistant",
-                          content={"text": result["text"], "actions": result["actions"], "model": result["model"]})
+                          content={"text": result["text"], "actions": result["actions"], "model": result["model"],
+                                   "sources": result.get("sources", [])})
         db.add_all([um, am])
         db.commit()
         return [_out(um), _out(am)]

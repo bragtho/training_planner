@@ -15,6 +15,7 @@ from typing import Any
 import anthropic
 from sqlalchemy.orm import Session
 
+from .. import atp as A
 from ..config import get_settings
 from ..metrics.fitness import current_status, pmc_rows, weekly_summary
 from ..models import User
@@ -46,11 +47,20 @@ bevor Du anpasst. Ein verpasstes Training holst Du nicht pauschal nach.
 # Gedaechtnis
 Du hast ein dauerhaftes Gedaechtnis ueber den Athleten (save_memory, forget_memory). Es steht unten im Kontext und ist in jeder Unterhaltung da. Entscheide selbst, was hinein gehoert, ohne dass der Athlet darum bitten muss, und frage nicht um Erlaubnis.
 - Speichern: was ueber diese Unterhaltung hinaus fuer Beratung und Planung relevant bleibt. Beispiele: Saisonphase (z. B. Offseason, Beginn des strukturierten Trainings), Vorlieben (drinnen/draussen, Tageszeit, Lieblings- und Hassintervalle), Einschraenkungen (Verletzung, Beruf, Familie, Reisen, Urlaub), Ausstattung (Rolle, Powermeter), Erfahrungen und Entscheidungen aus dem Gespraech.
-- Nicht speichern: Tagesform und Einmaliges, Werte, die Du ueber Werkzeuge bekommst (FTP, CTL, Aktivitaeten), Smalltalk, Details ohne Trainingsbezug. Gesundheit nur, soweit fuer das Training noetig, knapp und ohne Diagnosen. Ziele und Verfuegbarkeit gehoeren weiter in update_athlete_notes.
+- Nicht speichern: Tagesform und Einmaliges, Werte, die Du ueber Werkzeuge bekommst (FTP, CTL, Aktivitaeten), Smalltalk, Details ohne Trainingsbezug. Gesundheit nur, soweit fuer das Training noetig, knapp und ohne Diagnosen. Ziele und Verfuegbarkeit gehoeren weiter in update_athlete_notes, Events und Wochenziele in den Saisonplan: Notiere ins Gedaechtnis nichts, was dort schon steht (kein "Saisonplan angelegt", keine Eventlisten).
 - Form: ein Fakt pro Eintrag, ein Satz, absolute Daten statt "naechste Woche". Zeitlich begrenzte Fakten bekommen valid_until (z. B. Offseason bis zum Tag vor dem Trainingsbeginn), danach vergisst Du sie automatisch.
 - Pflege: Schau zuerst in die Liste. Ist ein Fakt schon da oder hat sich geaendert, aktualisiere ihn (save_memory mit id) statt einen zweiten anzulegen. Ist etwas ueberholt oder widerrufen oder soll der Athlet es vergessen, nutze forget_memory.
 - Stehen im bisherigen Gespraech Fakten, die noch nicht im Gedaechtnis sind, speichere sie jetzt.
 - Nutze das Gedaechtnis aktiv und widersprich ihm nicht: Plane und berate im Einklang damit (in der Offseason z. B. keine harten Intervalle vorschlagen, wenn das so besprochen ist). Sag dem Athleten in einem Halbsatz, was Du Dir gemerkt hast.
+
+# Saisonplan (ATP)
+Fuer Athleten, die auf Events hinarbeiten, pflegst Du einen Saisonplan wie in TrainingPeaks: Events mit Prioritaet (A, B, C) und Wochenziele je Trainingsphase (get_season_plan, set_season_plan_weeks, save_season_event, delete_season_event). Er steht im Kontext unten und im Kalender der App.
+- Grundlage: Frage zuerst knapp nach Events mit Datum und Prioritaet (A = ein bis drei Hauptziele der Saison), verfuegbarer Zeit je Woche und dem Trainingsbeginn, falls das fehlt. Nennt der Athlet ein Event, trage es ohne Rueckfrage ein (save_season_event).
+- Rueckwaerts planen: Vom A-Event aus. Wettkampfwoche (race), davor 1-2 Wochen Spitze (peak) mit Tapering (Last etwa 40-60 %, Intensitaet bleibt), davor 6-10 Wochen Aufbau (build), davor 8-16 Wochen Grundlage (base). Nach der Saison oder in der Offseason Uebergang (transition, Wochenziele etwa 30-50 % der normalen Last); davor kurze Vorbereitung (preparation), wenn das strukturierte Training beginnt.
+- Wochenziele: Referenz 7 x CTL. Der CTL soll im Aufbau um 3-6 pro Woche steigen, bei Leistungssportlern bis 8. Rhythmus 3:1 (2:1 bei Masters oder hoher Belastung), Entlastungswoche (recovery=true) bei 60-70 % der Vorwoche. Keine Spruenge ueber 30 %. Form (TSB) am A-Event etwa +5 bis +25.
+- Pruefen: Das Ergebnis von set_season_plan_weeks enthaelt die CTL/TSB-Prognose und checks. Behebe Hinweise und speichere erneut, bevor Du antwortest. Die Prognose verteilt die Wochen-TSS gleichmaessig auf die Tage und ist eine Naeherung.
+- Umfang: Plane lueckenlos bis zum letzten A-Event (bis etwa 52 Wochen), bei langen Plaenen in mehreren Aufrufen. Wochen im Saisonplan sind Ziele, keine Trainings. Einzelne Trainings legst Du weiter mit create_workouts an und orientierst Dich dabei am Wochenziel.
+- Pflege: Beruecksichtige das Gedaechtnis (z. B. Offseason bis zu einem Datum, dann transition bis dahin) und die Verfuegbarkeit. Aendere den Plan nur bei Anlass (neues Event, Verletzung, Krankheit, verpasste Wochen) und sag, was Du geaendert hast. Loesche den Plan nie ohne Wunsch des Athleten.
 
 # Trainingsregeln
 - Periodisierung: Belastungswochen und Entlastungswoche, typisch 3:1 (Entlastungswoche ca. 60-70 % der Last). \
@@ -101,6 +111,7 @@ def build_context(db: Session, user: User, today: dt.date | None = None) -> str:
                   "TSS je Woche (aelteste zuerst): " + ", ".join(str(w["tss"]) for w in weekly_summary(db, user.id, 6, today))]
     else:
         lines += ["", "Es liegen noch keine Trainingsdaten mit TSS vor."]
+    lines += ["", "Saisonplan (ATP):"] + A.context_lines(db, user.id, today)
     lines += ["", "Gedaechtnis (id in Klammern):"] + ([f"- {T.memory_line(m)}" for m in memories] or ["- noch leer"])
     return "\n".join(lines)
 

@@ -41,6 +41,30 @@ abstract final class AppColors {
   static Color zoneColor(num pctFtp) => zones[zoneIndex(pctFtp)];
 }
 
+/// Trainingsphasen des Saisonplans (ATP) mit deutschem Namen und Farbe; Reihenfolge wie im Backend.
+abstract final class Phases {
+  static const all = <String, (String, Color)>{
+    'preparation': ('Vorbereitung', Color(0xFF64748B)),
+    'base': ('Grundlage', Color(0xFF0EA5E9)),
+    'build': ('Aufbau', Color(0xFFF59E0B)),
+    'peak': ('Spitze', Color(0xFFEF4444)),
+    'race': ('Wettkampf', Color(0xFFA855F7)),
+    'transition': ('Übergang', Color(0xFF14B8A6)),
+  };
+
+  static String label(String? key) => all[key]?.$1 ?? '';
+  static Color color(String? key) => all[key]?.$2 ?? const Color(0xFF94A3B8);
+}
+
+/// Prioritaet eines Events: A = Hauptziel, B = wichtig, C = Trainingswettkampf.
+abstract final class EventPriority {
+  static Color color(String p) => switch (p) {
+        'A' => const Color(0xFFE11D48),
+        'B' => const Color(0xFFF59E0B),
+        _ => const Color(0xFF64748B),
+      };
+}
+
 /// Abstaende und Radien, damit alle Bildschirme denselben Rhythmus haben.
 abstract final class Gap {
   static const xs = 4.0;

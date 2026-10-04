@@ -23,8 +23,14 @@ MAX_TEXT = 4000
 QUICK_PROMPTS = {
     "plan_week": (
         "Plane meine Trainingswoche. Schau Dir zuerst meinen aktuellen Zustand, die letzten Wochen und meinen Kalender an. "
-        "Plane die Trainingstage ab heute bis zum kommenden Sonntag; sind es weniger als drei Tage, plane die ganze naechste Woche. "
+        "Orientiere Dich am Wochenziel aus dem Saisonplan, falls es einen gibt. Plane die Trainingstage ab heute bis zum kommenden Sonntag; sind es weniger als drei Tage, plane die ganze naechste Woche. "
         "Beruecksichtige meine Ziele und Verfuegbarkeit und lege die Trainings im Kalender an. Fehlt etwas Wesentliches, frag mich zuerst."
+    ),
+    "plan_season": (
+        "Erstelle meinen Saisonplan (ATP). Schau Dir zuerst mein Profil, Dein Gedaechtnis, meine Events und den bisherigen Plan (get_season_plan) "
+        "und meine Form an. Fehlen Events mit Datum und Prioritaet oder meine verfuegbare Zeit je Woche, frag mich zuerst knapp danach. "
+        "Sonst baue den Plan rueckwaerts von meinen A-Events auf, pruefe die Hinweise und fasse danach die Phasen mit Zeitraeumen, "
+        "typischen Wochenzielen (TSS) und der erwarteten Form am Event kurz zusammen."
     ),
     "review_last": (
         "Werte mein letztes Training aus. Vergleiche es mit dem Plan und meiner aktuellen Form (CTL, ATL, TSB) und sag mir, "
@@ -41,7 +47,7 @@ class ChatIn(BaseModel):
 
 
 class QuickIn(BaseModel):
-    action: Literal["plan_week", "review_last"]
+    action: Literal["plan_week", "plan_season", "review_last"]
 
 
 class MessageOut(BaseModel):
@@ -160,8 +166,8 @@ def chat(body: ChatIn, user: User = Depends(current_user), db: Session = Depends
 def quick(body: QuickIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     s = get_settings()
     # Planen ist die anspruchsvollste Aufgabe: staerkeres Modell und hoeherer Aufwand
-    if body.action == "plan_week":
-        return _run(db, user, QUICK_PROMPTS["plan_week"], s.coach_planning_model, "high")
+    if body.action in ("plan_week", "plan_season"):
+        return _run(db, user, QUICK_PROMPTS[body.action], s.coach_planning_model, "high")
     return _run(db, user, QUICK_PROMPTS["review_last"], s.coach_chat_model, "medium")
 
 

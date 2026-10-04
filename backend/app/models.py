@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 
-from sqlalchemy import JSON, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -111,3 +111,30 @@ class CoachMemory(Base):
     valid_until: Mapped[date | None] = mapped_column(Date)  # zeitlich begrenzte Fakten, z. B. Offseason
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
+class AtpWeek(Base):
+    """Eine Woche im Saisonplan (ATP, Annual Training Plan): Phase und Wochenziel."""
+
+    __tablename__ = "atp_weeks"
+    __table_args__ = (UniqueConstraint("user_id", "week_start"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    week_start: Mapped[date] = mapped_column(Date, index=True)  # immer ein Montag
+    phase: Mapped[str] = mapped_column(String(20))  # preparation|base|build|peak|race|transition
+    tss_target: Mapped[float] = mapped_column(Float)
+    hours_target: Mapped[float | None] = mapped_column(Float)
+    recovery: Mapped[bool] = mapped_column(Boolean, default=False)  # Entlastungswoche
+    note: Mapped[str | None] = mapped_column(String(200))
+
+
+class SeasonEvent(Base):
+    """Wettkampf oder Ziel im Saisonplan mit Prioritaet A (Hauptziel), B oder C."""
+
+    __tablename__ = "season_events"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    date: Mapped[date] = mapped_column(Date, index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    priority: Mapped[str] = mapped_column(String(1), default="B")
+    notes: Mapped[str | None] = mapped_column(String(300))

@@ -15,7 +15,8 @@ from sqlalchemy.orm import Session
 
 from ..metrics.fitness import current_status, pmc_rows, weekly_summary
 from ..metrics.power import power_zones
-from ..models import Activity, CoachMemory, PlannedWorkout, User
+from .. import atp as A
+from ..models import Activity, AtpWeek, CoachMemory, PlannedWorkout, User
 from ..routers.plans import WorkoutIn, _apply, calendar_data
 
 MAX_CREATE = 21
@@ -164,6 +165,66 @@ TOOLS: list[dict] = [
         },
     },
     {
+        "name": "get_season_plan",
+        "description": "Liest den Saisonplan (ATP): je Woche Phase, Wochenziel (TSS/Stunden), Entlastung, Soll/Ist-Last und CTL/TSB "
+                       "(Ist bis heute, danach Prognose aus den Wochenzielen), dazu die Events mit Prioritaet und Form am Eventtag. "
+                       "Ohne Datum: von vier Wochen zurueck bis 52 Wochen voraus. checks enthaelt Hinweise auf Probleme im Plan.",
+        "input_schema": {"type": "object", "properties": {"start": _DATE, "end": _DATE}},
+    },
+    {
+        "name": "set_season_plan_weeks",
+        "description": "Legt Wochen des Saisonplans (ATP) an oder aktualisiert sie (hoechstens 80 je Aufruf, teile lange Plaene auf). "
+                       "Wochen ohne Eintrag zaehlen in der Prognose als Ruhe, plane also lueckenlos. Das Ergebnis enthaelt die Prognose "
+                       "und checks: behebe Hinweise (zu steiler CTL-Anstieg, fehlende Entlastung, Form am Event) und speichere erneut, "
+                       "bevor Du antwortest. Legt keine einzelnen Trainings an.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"weeks": {
+                "type": "array", "minItems": 1, "maxItems": A.MAX_WEEKS_PER_CALL,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "week_start": {**_DATE, "description": "Montag der Woche (ein anderer Tag wird auf den Montag der Woche gesetzt)"},
+                        "phase": {"type": "string", "enum": list(A.PHASES),
+                                  "description": "preparation Vorbereitung, base Grundlage, build Aufbau, peak Spitze, race Wettkampf, transition Uebergang/Offseason"},
+                        "tss_target": {"type": "number", "description": "Ziel-TSS der Woche (0-3000)"},
+                        "hours_target": {"type": "number", "description": "Optional: Ziel-Stunden der Woche"},
+                        "recovery": {"type": "boolean", "description": "true bei Entlastungswoche"},
+                        "note": {"type": "string", "description": "Optional: Schwerpunkt der Woche, hoechstens 200 Zeichen"},
+                    },
+                    "required": ["week_start", "phase", "tss_target"],
+                },
+            }},
+            "required": ["weeks"],
+        },
+    },
+    {
+        "name": "clear_season_plan_weeks",
+        "description": "Loescht Wochen des Saisonplans im angegebenen Zeitraum (beide Daten sind Pflicht, die Wochen davon sind eingeschlossen). "
+                       "Nutze es nur, wenn der Athlet den Plan verwerfen oder neu aufbauen will. Events bleiben bestehen.",
+        "input_schema": {"type": "object", "properties": {"start": _DATE, "end": _DATE}, "required": ["start", "end"]},
+    },
+    {
+        "name": "save_season_event",
+        "description": "Legt ein Event (Wettkampf oder Ziel) im Saisonplan an oder aendert es (mit id). Prioritaet A = Hauptziel der Saison "
+                       "(darauf wird die Form hingearbeitet), B = wichtig, C = Trainingswettkampf ohne Tapering.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"}, "date": _DATE,
+                "priority": {"type": "string", "enum": list(A.PRIORITIES)},
+                "notes": {"type": "string", "description": "Optional, hoechstens 300 Zeichen (Strecke, Hoehenmeter, Ziel)"},
+                "id": {"type": "integer", "description": "id eines vorhandenen Events, das geaendert werden soll"},
+            },
+            "required": ["name", "date", "priority"],
+        },
+    },
+    {
+        "name": "delete_season_event",
+        "description": "Loescht ein Event aus dem Saisonplan (Absage, Fehleintrag oder auf Wunsch des Athleten).",
+        "input_schema": {"type": "object", "properties": {"id": {"type": "integer"}}, "required": ["id"]},
+    },
+    {
         "name": "forget_memory",
         "description": "Loescht einen Eintrag aus Deinem Gedaechtnis, wenn er ueberholt oder widerrufen ist oder der Athlet es verlangt.",
         "input_schema": {"type": "object", "properties": {"id": {"type": "integer"}}, "required": ["id"]},
@@ -214,6 +275,14 @@ def _week_checks(db: Session, user: User, dates: set[dt.date]) -> list[dict]:
         ref = round(ctl * 7)
         check = {"week_start": monday.isoformat(), "planned_tss": round(planned), "reference_tss_7xCTL": ref,
                  "workouts": len([w for w in ws if w.status != "skipped"])}
+        week = db.scalar(select(AtpWeek).where(AtpWeek.user_id == user.id, AtpWeek.week_start == monday))
+        if week:  # Wochenziel aus dem Saisonplan (ATP)
+            check["atp_target_tss"] = round(week.tss_target)
+            check["atp_phase"] = A.PHASES[week.phase]
+            if week.tss_target > 0 and planned > week.tss_target * 1.15:
+                check["atp_note"] = "Geplante Last liegt mehr als 15 % ueber dem Wochenziel des Saisonplans."
+            elif week.tss_target > 0 and planned < week.tss_target * 0.85:
+                check["atp_note"] = "Geplante Last liegt mehr als 15 % unter dem Wochenziel des Saisonplans (evtl. noch nicht alle Tage geplant)."
         if ref >= 70:
             ratio = planned / ref
             check["ratio_to_reference"] = round(ratio, 2)
@@ -434,6 +503,53 @@ def forget_memory(db: Session, user: User, args: dict) -> dict:
     return {"forgotten": text}
 
 
+def _atp_call(fn, *args, **kwargs):
+    try:
+        return fn(*args, **kwargs)
+    except A.AtpError as e:
+        raise ToolError(str(e))
+
+
+def get_season_plan(db: Session, user: User, args: dict) -> dict:
+    today = dt.date.today()
+    start = _date(args["start"], "start") if args.get("start") else A.monday_of(today) - dt.timedelta(weeks=4)
+    end = _date(args["end"], "end") if args.get("end") else A.monday_of(today) + dt.timedelta(weeks=52)
+    if end < start or (end - start).days > 110 * 7:
+        raise ToolError("end muss nach start liegen, hoechstens 110 Wochen")
+    plan = A.get_plan(db, user.id, start, end, today)
+    weeks = [w for w in plan["weeks"] if w["phase"] or w["actual_tss"] or w["planned_tss"]]  # leere Wochen sparen Platz
+    return {"weeks": weeks, "events": plan["events"], "checks": A.plan_checks(plan, today)}
+
+
+def set_season_plan_weeks(db: Session, user: User, args: dict) -> dict:
+    starts = _atp_call(A.upsert_weeks, db, user.id, args.get("weeks"))
+    plan = A.full_plan(db, user.id)
+    saved = {d.isoformat() for d in starts}
+    return {
+        "saved_weeks": len(starts), "first_week": starts[0].isoformat(), "last_week": starts[-1].isoformat(),
+        "projection": [{"week_start": w["week_start"], "phase": w["phase"], "tss_target": w["tss_target"], "ctl": w["ctl"], "tsb": w["tsb"]}
+                       for w in plan["weeks"] if w["week_start"] in saved],
+        "events": plan["events"],
+        "checks": A.plan_checks(plan),
+    }
+
+
+def clear_season_plan_weeks(db: Session, user: User, args: dict) -> dict:
+    if not args.get("start") or not args.get("end"):
+        raise ToolError("start und end sind Pflicht")
+    n = A.clear_weeks(db, user.id, _date(args["start"], "start"), _date(args["end"], "end"))
+    return {"deleted_weeks": n}
+
+
+def save_season_event(db: Session, user: User, args: dict) -> dict:
+    ev = _atp_call(A.save_event, db, user.id, args)
+    return {"saved": {"id": ev.id, "name": ev.name, "date": ev.date.isoformat(), "priority": ev.priority}}
+
+
+def delete_season_event(db: Session, user: User, args: dict) -> dict:
+    return {"deleted": _atp_call(A.delete_event, db, user.id, args.get("id"))}
+
+
 HANDLERS = {
     "get_athlete_profile": get_athlete_profile,
     "get_fitness_status": get_fitness_status,
@@ -445,10 +561,16 @@ HANDLERS = {
     "update_athlete_notes": update_athlete_notes,
     "save_memory": save_memory,
     "forget_memory": forget_memory,
+    "get_season_plan": get_season_plan,
+    "set_season_plan_weeks": set_season_plan_weeks,
+    "clear_season_plan_weeks": clear_season_plan_weeks,
+    "save_season_event": save_season_event,
+    "delete_season_event": delete_season_event,
 }
 
 # Tools, die etwas veraendern (fuer die Aktionsliste in der App)
-WRITE_TOOLS = {"create_workouts", "update_workout", "delete_workout", "update_athlete_notes", "save_memory", "forget_memory"}
+WRITE_TOOLS = {"create_workouts", "update_workout", "delete_workout", "update_athlete_notes", "save_memory", "forget_memory",
+               "set_season_plan_weeks", "clear_season_plan_weeks", "save_season_event", "delete_season_event"}
 
 
 def action_summary(name: str, args: dict, result: dict) -> str:
@@ -458,6 +580,14 @@ def action_summary(name: str, args: dict, result: dict) -> str:
         return f"Training geaendert: {result['updated']['title']} ({result['updated']['date']})"
     if name == "delete_workout":
         return f"Training geloescht: {result['deleted']['title']} ({result['deleted']['date']})"
+    if name == "set_season_plan_weeks":
+        return f"Saisonplan: {result['saved_weeks']} Woche(n) gespeichert"
+    if name == "clear_season_plan_weeks":
+        return f"Saisonplan: {result['deleted_weeks']} Woche(n) geloescht"
+    if name == "save_season_event":
+        return f"Event gespeichert: {result['saved']['name']} ({result['saved']['date']})"[:120]
+    if name == "delete_season_event":
+        return f"Event geloescht: {result['deleted']}"[:120]
     if name == "save_memory":
         return f"Gemerkt: {args.get('text', '')}"[:120]
     if name == "forget_memory":

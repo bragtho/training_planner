@@ -9,6 +9,7 @@ import '../features/calendar/workout_editor.dart';
 import '../features/coach/coach_screen.dart';
 import '../features/dashboard/dashboard_screen.dart';
 import '../features/profile/profile_screen.dart';
+import '../features/season/season_screen.dart';
 import '../features/shell/app_shell.dart';
 import 'auth.dart';
 
@@ -30,6 +31,7 @@ final routerProvider = Provider<GoRouter>((ref) {
     },
     routes: [
       GoRoute(path: '/login', builder: (_, _) => const LoginScreen()),
+      GoRoute(path: '/season', builder: (_, _) => const SeasonScreen()),
       GoRoute(
         path: '/workout/new',
         builder: (_, state) => WorkoutEditorScreen(

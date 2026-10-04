@@ -73,7 +73,12 @@ class _CoachScreenState extends ConsumerState<CoachScreen> {
   /// Sendet eine Nachricht oder startet eine Schnellaktion; die Antwort kann bis zu einigen Minuten dauern.
   Future<void> _send({String? text, String? quick}) async {
     if (_sending) return;
-    final shown = text ?? (quick == 'plan_week' ? 'Woche planen' : 'Letztes Training auswerten');
+    final shown = text ??
+        switch (quick) {
+          'plan_week' => 'Woche planen',
+          'plan_season' => 'Saisonplan erstellen',
+          _ => 'Letztes Training auswerten',
+        };
     setState(() {
       _sending = true;
       _error = null;
@@ -95,7 +100,8 @@ class _CoachScreenState extends ConsumerState<CoachScreen> {
       // Formhinweis und Gedaechtnis richten sich nach dem Gespraech
       ref
         ..invalidate(formHintProvider)
-        ..invalidate(coachMemoriesProvider);
+        ..invalidate(coachMemoriesProvider)
+        ..invalidate(atpProvider);
       if ((out.last['actions'] as List).isNotEmpty) {
         ref
           ..invalidate(calendarProvider)
@@ -216,6 +222,12 @@ class _CoachScreenState extends ConsumerState<CoachScreen> {
                             ),
                             const SizedBox(width: Gap.sm),
                             ActionChip(
+                              avatar: const Icon(Icons.timeline_rounded, size: 18),
+                              label: const Text('Saisonplan'),
+                              onPressed: canSend ? () => _send(quick: 'plan_season') : null,
+                            ),
+                            const SizedBox(width: Gap.sm),
+                            ActionChip(
                               avatar: const Icon(Icons.fact_check_outlined, size: 18),
                               label: const Text('Letztes Training auswerten'),
                               onPressed: canSend ? () => _send(quick: 'review_last') : null,
@@ -332,6 +344,8 @@ class _Intro extends StatelessWidget {
     final suggestions = <(IconData, String, String, VoidCallback)>[
       (Icons.edit_calendar_rounded, 'Woche planen', 'Trainings für die nächsten 7 Tage in den Kalender',
           () => onQuick('plan_week')),
+      (Icons.timeline_rounded, 'Saisonplan erstellen', 'Phasen und Wochenziele bis zu Deinem Hauptziel',
+          () => onQuick('plan_season')),
       (Icons.fact_check_outlined, 'Letztes Training auswerten', 'Was lief gut, was kann besser werden?',
           () => onQuick('review_last')),
       (Icons.battery_charging_full_rounded, 'Brauche ich Erholung?', 'Einschätzung anhand Deiner Form',
@@ -443,6 +457,14 @@ class _ThinkingState extends State<_Thinking> with SingleTickerProviderStateMixi
 
 bool _isMemoryAction(String a) => a.startsWith('Gemerkt:') || a.startsWith('Vergessen:');
 
+bool _isSeasonAction(String a) => a.startsWith('Saisonplan') || a.startsWith('Event ');
+
+String _actionRoute(String a) => _isMemoryAction(a)
+    ? '/profile'
+    : _isSeasonAction(a)
+        ? '/season'
+        : '/calendar';
+
 class _Bubble extends StatelessWidget {
   const _Bubble({required this.m});
   final Json m;
@@ -481,11 +503,11 @@ class _Bubble extends StatelessWidget {
               for (final a in actions)
                 InkWell(
                   borderRadius: BorderRadius.circular(Radii.sm),
-                  onTap: () => context.go(_isMemoryAction(a) ? '/profile' : '/calendar'),
+                  onTap: () => context.go(_actionRoute(a)),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 4),
                     child: Row(mainAxisSize: MainAxisSize.min, children: [
-                      Icon(_isMemoryAction(a) ? Icons.auto_awesome : Icons.event_available_rounded,
+                      Icon(_isMemoryAction(a) ? Icons.auto_awesome : (_isSeasonAction(a) ? Icons.timeline_rounded : Icons.event_available_rounded),
                           size: 16, color: AppColors.completed),
                       const SizedBox(width: 6),
                       Flexible(

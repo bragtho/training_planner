@@ -97,3 +97,28 @@ String formatDuration(num seconds) {
 }
 
 String formatKm(num meters) => '${(meters / 1000).toStringAsFixed(1)} km';
+
+/// Saisonplan (ATP) und Events fuer einen Zeitraum: lueckenlose Wochenliste mit Plan, Soll/Ist-Last, CTL und TSB.
+final atpProvider = FutureProvider.autoDispose.family<Json, DateRange>((ref, range) async {
+  final r = await ref
+      .watch(apiProvider)
+      .dio
+      .get('/atp', queryParameters: {'start': isoDay(range.$1), 'end': isoDay(range.$2)});
+  return Json.from(r.data as Map);
+});
+
+DateTime mondayOf(DateTime d) => DateTime(d.year, d.month, d.day - (d.weekday - 1));
+
+/// Standardzeitraum der Saisonansichten: vier Wochen zurueck bis 52 voraus (gleicher Schluessel, damit der Cache geteilt wird).
+DateRange seasonRange([DateTime? now]) {
+  final m = mondayOf(now ?? DateTime.now());
+  return (DateTime(m.year, m.month, m.day - 28), DateTime(m.year, m.month, m.day + 52 * 7));
+}
+
+/// ISO-Kalenderwoche (Woche mit dem ersten Donnerstag des Jahres ist KW 1).
+int isoWeek(DateTime d) {
+  // UTC, damit die Zeitumstellung die Tagesdifferenz nicht verfaelscht
+  final thursday = DateTime.utc(d.year, d.month, d.day + 4 - d.weekday);
+  final firstJan = DateTime.utc(thursday.year, 1, 1);
+  return (thursday.difference(firstJan).inDays / 7).floor() + 1;
+}

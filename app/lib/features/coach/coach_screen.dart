@@ -10,6 +10,7 @@ import '../../core/auth.dart';
 import '../../core/data.dart';
 import '../../core/theme.dart';
 import '../../core/ui.dart';
+import 'knowledge_sources.dart';
 import 'rich_text.dart';
 
 class CoachScreen extends ConsumerStatefulWidget {
@@ -474,6 +475,7 @@ class _Bubble extends StatelessWidget {
     final t = Theme.of(context);
     final mine = m['role'] == 'user';
     final actions = [for (final a in (m['actions'] as List? ?? const [])) a as String];
+    final sources = [for (final s in (m['sources'] as List? ?? const [])) Json.from(s as Map)];
     final maxW = math.min(640.0, MediaQuery.sizeOf(context).width * 0.8);
     final base = t.textTheme.bodyMedium!.copyWith(height: 1.45, color: mine ? t.colorScheme.onPrimary : null);
     final bubble = Container(
@@ -491,6 +493,10 @@ class _Bubble extends StatelessWidget {
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         SelectableText.rich(simpleMarkdown(m['text'] as String, base)),
+        if (sources.isNotEmpty) ...[
+          const SizedBox(height: Gap.md),
+          SourceChips(sources: sources),
+        ],
         if (actions.isNotEmpty) ...[
           const SizedBox(height: Gap.md),
           Container(

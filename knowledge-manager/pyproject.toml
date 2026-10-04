@@ -1,0 +1,19 @@
+[project]
+name = "wissens-manager"
+version = "0.1.0"
+description = "Recherche, Bewertung und Pflege der Wissensbasis des Radtrainings-Coaches"
+requires-python = ">=3.11"
+dependencies = [
+  "PyQt6>=6.7",
+  "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pyinstaller>=6.10"]
+
+[project.scripts]
+wissens-manager = "wissens_manager.__main__:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

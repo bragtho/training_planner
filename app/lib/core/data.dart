@@ -40,6 +40,37 @@ final profileProvider = FutureProvider.autoDispose<Json>((ref) async {
   return Json.from(r.data as Map);
 });
 
+/// Formhinweis vom Coach, abgestimmt auf Gespraech und Ziele. null: es gibt keinen oder er ist nicht erreichbar,
+/// die Uebersicht zeigt dann den Standardtext. Die Antwort kann wenige Sekunden dauern (Modellaufruf).
+final formHintProvider = FutureProvider.autoDispose<String?>((ref) async {
+  try {
+    final r = await ref.watch(apiProvider).dio.get('/coach/form-hint');
+    final text = (r.data as Map)['text'];
+    return text is String && text.trim().isNotEmpty ? text.trim() : null;
+  } catch (_) {
+    return null;
+  }
+});
+
+/// Eintrag im Gedaechtnis des Coaches.
+class CoachMemory {
+  const CoachMemory({required this.id, required this.text, this.validUntil});
+  final int id;
+  final String text;
+  final DateTime? validUntil;
+
+  factory CoachMemory.fromJson(Map<String, dynamic> j) => CoachMemory(
+        id: j['id'] as int,
+        text: j['text'] as String,
+        validUntil: j['valid_until'] == null ? null : DateTime.parse(j['valid_until'] as String),
+      );
+}
+
+final coachMemoriesProvider = FutureProvider.autoDispose<List<CoachMemory>>((ref) async {
+  final r = await ref.watch(apiProvider).dio.get('/coach/memories');
+  return [for (final m in r.data as List) CoachMemory.fromJson(Map<String, dynamic>.from(m as Map))];
+});
+
 final stravaStatusProvider = FutureProvider.autoDispose<Json>((ref) async {
   final r = await ref.watch(apiProvider).dio.get('/integrations/strava/status');
   return Json.from(r.data as Map);

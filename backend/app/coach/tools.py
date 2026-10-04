@@ -15,11 +15,13 @@ from sqlalchemy.orm import Session
 
 from ..metrics.fitness import current_status, pmc_rows, weekly_summary
 from ..metrics.power import power_zones
-from ..models import Activity, PlannedWorkout, User
+from ..models import Activity, CoachMemory, PlannedWorkout, User
 from ..routers.plans import WorkoutIn, _apply, calendar_data
 
 MAX_CREATE = 21
 MAX_HORIZON_DAYS = 120
+MAX_MEMORIES = 40
+MAX_MEMORY_CHARS = 300
 WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 
 
@@ -144,6 +146,27 @@ TOOLS: list[dict] = [
                 },
             },
         },
+    },
+    {
+        "name": "save_memory",
+        "description": "Merkt Dir einen dauerhaft relevanten Fakt ueber den Athleten (Vorlieben, Saisonphase, Einschraenkungen, Ausstattung, "
+                       "Entscheidungen aus dem Gespraech). Ein Fakt pro Eintrag, ein Satz, mit absoluten Daten statt 'naechste Woche'. "
+                       "Mit id aktualisierst Du einen vorhandenen Eintrag (siehe Gedaechtnis im Kontext), statt ein Duplikat anzulegen.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": f"Der Fakt, hoechstens {MAX_MEMORY_CHARS} Zeichen"},
+                "valid_until": {**_DATE, "description": "Nur fuer zeitlich begrenzte Fakten (z. B. Offseason): letzter Tag der Gueltigkeit, "
+                                                        "danach vergisst Du ihn automatisch. Heute oder spaeter."},
+                "id": {"type": "integer", "description": "id eines vorhandenen Eintrags, der ersetzt werden soll"},
+            },
+            "required": ["text"],
+        },
+    },
+    {
+        "name": "forget_memory",
+        "description": "Loescht einen Eintrag aus Deinem Gedaechtnis, wenn er ueberholt oder widerrufen ist oder der Athlet es verlangt.",
+        "input_schema": {"type": "object", "properties": {"id": {"type": "integer"}}, "required": ["id"]},
     },
 ]
 
@@ -350,6 +373,67 @@ def update_athlete_notes(db: Session, user: User, args: dict) -> dict:
     return {"saved": changed}
 
 
+def active_memories(db: Session, user_id: int, today: dt.date | None = None) -> list[CoachMemory]:
+    """Gueltige Eintraege (abgelaufene werden ignoriert), aelteste zuerst."""
+    today = today or dt.date.today()
+    return list(db.scalars(
+        select(CoachMemory).where(
+            CoachMemory.user_id == user_id,
+            (CoachMemory.valid_until.is_(None)) | (CoachMemory.valid_until >= today),
+        ).order_by(CoachMemory.id)
+    ))
+
+
+def memory_line(m: CoachMemory) -> str:
+    until = f" (gilt bis {m.valid_until.isoformat()})" if m.valid_until else ""
+    return f"[{m.id}] {m.text}{until}"
+
+
+def save_memory(db: Session, user: User, args: dict) -> dict:
+    text = " ".join(str(args.get("text") or "").split())
+    if not text:
+        raise ToolError("text darf nicht leer sein")
+    if len(text) > MAX_MEMORY_CHARS:
+        raise ToolError(f"text ist laenger als {MAX_MEMORY_CHARS} Zeichen, fasse Dich kuerzer")
+    until = None
+    if args.get("valid_until"):
+        until = _date(args["valid_until"], "valid_until")
+        if until < dt.date.today():
+            raise ToolError("valid_until liegt in der Vergangenheit")
+    mem = None
+    if args.get("id") is not None:
+        mem = db.get(CoachMemory, args["id"]) if isinstance(args["id"], int) else None
+        if mem is None or mem.user_id != user.id:
+            raise ToolError("Eintrag nicht gefunden")
+    current = active_memories(db, user.id)
+    if mem is None:
+        same = next((m for m in current if m.text.casefold() == text.casefold()), None)
+        if same is not None:  # schon vorhanden: nichts doppelt speichern, nur Gueltigkeit nachziehen
+            if until and same.valid_until != until:
+                same.valid_until = until
+                db.commit()
+            return {"saved": memory_line(same), "note": "Eintrag existierte bereits"}
+        if len(current) >= MAX_MEMORIES:
+            raise ToolError(f"Gedaechtnis ist voll ({MAX_MEMORIES} Eintraege). Fasse Eintraege zusammen "
+                            "(save_memory mit id) oder loesche Ueberholtes (forget_memory).")
+        mem = CoachMemory(user_id=user.id, text=text, valid_until=until)
+        db.add(mem)
+    else:
+        mem.text, mem.valid_until = text, until
+    db.commit()
+    return {"saved": memory_line(mem)}
+
+
+def forget_memory(db: Session, user: User, args: dict) -> dict:
+    mem = db.get(CoachMemory, args["id"]) if isinstance(args.get("id"), int) else None
+    if mem is None or mem.user_id != user.id:
+        raise ToolError("Eintrag nicht gefunden")
+    text = mem.text
+    db.delete(mem)
+    db.commit()
+    return {"forgotten": text}
+
+
 HANDLERS = {
     "get_athlete_profile": get_athlete_profile,
     "get_fitness_status": get_fitness_status,
@@ -359,10 +443,12 @@ HANDLERS = {
     "update_workout": update_workout,
     "delete_workout": delete_workout,
     "update_athlete_notes": update_athlete_notes,
+    "save_memory": save_memory,
+    "forget_memory": forget_memory,
 }
 
 # Tools, die etwas veraendern (fuer die Aktionsliste in der App)
-WRITE_TOOLS = {"create_workouts", "update_workout", "delete_workout", "update_athlete_notes"}
+WRITE_TOOLS = {"create_workouts", "update_workout", "delete_workout", "update_athlete_notes", "save_memory", "forget_memory"}
 
 
 def action_summary(name: str, args: dict, result: dict) -> str:
@@ -372,4 +458,8 @@ def action_summary(name: str, args: dict, result: dict) -> str:
         return f"Training geaendert: {result['updated']['title']} ({result['updated']['date']})"
     if name == "delete_workout":
         return f"Training geloescht: {result['deleted']['title']} ({result['deleted']['date']})"
+    if name == "save_memory":
+        return f"Gemerkt: {args.get('text', '')}"[:120]
+    if name == "forget_memory":
+        return f"Vergessen: {result['forgotten']}"[:120]
     return "Ziele/Verfuegbarkeit gespeichert"

@@ -30,7 +30,8 @@ class DashboardScreen extends ConsumerWidget {
       ref
         ..invalidate(pmcProvider)
         ..invalidate(activitiesProvider)
-        ..invalidate(calendarProvider);
+        ..invalidate(calendarProvider)
+        ..invalidate(formHintProvider);
       await ref.read(pmcProvider.future);
     }
 
@@ -154,14 +155,15 @@ class _Overview extends StatelessWidget {
 }
 
 /// Grosse Karte, die die aktuelle Form in Worte fasst und auf einer Skala zeigt.
-class _FormHero extends StatelessWidget {
+class _FormHero extends ConsumerWidget {
   const _FormHero({required this.tsb});
   final num tsb;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final t = Theme.of(context);
     final s = FormStatus.of(tsb);
+    final hint = ref.watch(formHintProvider);
     return Card(
       clipBehavior: Clip.antiAlias,
       child: Container(
@@ -191,7 +193,7 @@ class _FormHero extends StatelessWidget {
               ),
             ]),
             const SizedBox(height: Gap.md),
-            Text(s.advice, style: t.textTheme.bodyMedium),
+            _Advice(fallback: s.advice, hint: hint),
           ]);
           final gauge = _FormGauge(tsb: tsb);
           if (c.maxWidth < 640) {
@@ -209,6 +211,35 @@ class _FormHero extends StatelessWidget {
         }),
       ),
     );
+  }
+}
+
+/// Hinweis zur Form: Text vom Coach (kennt Gespraech und Ziele), sonst der Standardtext.
+/// Waehrend des Ladens ein Platzhalter, damit kurz keine unpassende Standardmeldung steht.
+class _Advice extends StatelessWidget {
+  const _Advice({required this.fallback, required this.hint});
+  final String fallback;
+  final AsyncValue<String?> hint;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context);
+    if (hint.isLoading && !hint.hasValue) {
+      Widget bar(double w) => Container(
+            width: w,
+            height: 12,
+            margin: const EdgeInsets.only(bottom: 8),
+            decoration: BoxDecoration(
+              color: t.colorScheme.onSurface.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(Radii.pill),
+            ),
+          );
+      return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        bar(double.infinity),
+        bar(180),
+      ]);
+    }
+    return Text(hint.value ?? fallback, style: t.textTheme.bodyMedium);
   }
 }
 

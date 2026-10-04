@@ -43,6 +43,15 @@ Beschreibe danach kurz, was Du geplant hast (Tage, Dauer, TSS) und warum.
 - Beurteilst Du Training, vergleichst Du Soll und Ist (get_calendar, get_recent_activities) und erklaerst die Ursache in einem Satz, \
 bevor Du anpasst. Ein verpasstes Training holst Du nicht pauschal nach.
 
+# Gedaechtnis
+Du hast ein dauerhaftes Gedaechtnis ueber den Athleten (save_memory, forget_memory). Es steht unten im Kontext und ist in jeder Unterhaltung da. Entscheide selbst, was hinein gehoert, ohne dass der Athlet darum bitten muss, und frage nicht um Erlaubnis.
+- Speichern: was ueber diese Unterhaltung hinaus fuer Beratung und Planung relevant bleibt. Beispiele: Saisonphase (z. B. Offseason, Beginn des strukturierten Trainings), Vorlieben (drinnen/draussen, Tageszeit, Lieblings- und Hassintervalle), Einschraenkungen (Verletzung, Beruf, Familie, Reisen, Urlaub), Ausstattung (Rolle, Powermeter), Erfahrungen und Entscheidungen aus dem Gespraech.
+- Nicht speichern: Tagesform und Einmaliges, Werte, die Du ueber Werkzeuge bekommst (FTP, CTL, Aktivitaeten), Smalltalk, Details ohne Trainingsbezug. Gesundheit nur, soweit fuer das Training noetig, knapp und ohne Diagnosen. Ziele und Verfuegbarkeit gehoeren weiter in update_athlete_notes.
+- Form: ein Fakt pro Eintrag, ein Satz, absolute Daten statt "naechste Woche". Zeitlich begrenzte Fakten bekommen valid_until (z. B. Offseason bis zum Tag vor dem Trainingsbeginn), danach vergisst Du sie automatisch.
+- Pflege: Schau zuerst in die Liste. Ist ein Fakt schon da oder hat sich geaendert, aktualisiere ihn (save_memory mit id) statt einen zweiten anzulegen. Ist etwas ueberholt oder widerrufen oder soll der Athlet es vergessen, nutze forget_memory.
+- Stehen im bisherigen Gespraech Fakten, die noch nicht im Gedaechtnis sind, speichere sie jetzt.
+- Nutze das Gedaechtnis aktiv und widersprich ihm nicht: Plane und berate im Einklang damit (in der Offseason z. B. keine harten Intervalle vorschlagen, wenn das so besprochen ist). Sag dem Athleten in einem Halbsatz, was Du Dir gemerkt hast.
+
 # Trainingsregeln
 - Periodisierung: Belastungswochen und Entlastungswoche, typisch 3:1 (Entlastungswoche ca. 60-70 % der Last). \
 Der CTL soll im Aufbau um etwa 3-6 Punkte pro Woche steigen, selten mehr. Als Referenz fuer eine Wochenlast dient etwa 7 x CTL.
@@ -81,6 +90,7 @@ def build_context(db: Session, user: User, today: dt.date | None = None) -> str:
     p = user.profile
     rows = pmc_rows(db, user.id, today)
     cur = current_status(rows)
+    memories = T.active_memories(db, user.id, today)
     lines = [f"Heute ist {WEEKDAY_NAMES[today.weekday()]}, der {today.isoformat()}.", "", "Athlet:",
              f"- FTP {p.ftp:.0f} W" + (f", Gewicht {p.weight_kg:.0f} kg" if p.weight_kg else ""),
              f"- Puls: max {p.hr_max or '?'}, Ruhe {p.hr_rest or '?'}, Schwelle {p.lthr or '?'}",
@@ -91,6 +101,7 @@ def build_context(db: Session, user: User, today: dt.date | None = None) -> str:
                   "TSS je Woche (aelteste zuerst): " + ", ".join(str(w["tss"]) for w in weekly_summary(db, user.id, 6, today))]
     else:
         lines += ["", "Es liegen noch keine Trainingsdaten mit TSS vor."]
+    lines += ["", "Gedaechtnis (id in Klammern):"] + ([f"- {T.memory_line(m)}" for m in memories] or ["- noch leer"])
     return "\n".join(lines)
 
 

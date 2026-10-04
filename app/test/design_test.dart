@@ -15,7 +15,7 @@ void main() {
   });
 
   test('Form wird in verstaendliche Bereiche eingeordnet', () {
-    expect(FormStatus.of(30).label, 'Erholt, Fitness sinkt');
+    expect(FormStatus.of(30).label, 'Sehr erholt');
     expect(FormStatus.of(10).label, 'Frisch');
     expect(FormStatus.of(0).label, 'Ausgeglichen');
     expect(FormStatus.of(-20).label, 'Produktives Training');

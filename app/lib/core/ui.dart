@@ -477,8 +477,8 @@ class FormStatus {
   static FormStatus of(num tsb) {
     if (tsb > 25) {
       return const FormStatus(
-        'Erholt, Fitness sinkt',
-        'Lange Pause: Du bist sehr frisch, verlierst aber Fitness. Zeit, wieder Reize zu setzen.',
+        'Sehr erholt',
+        'Deine Ermüdung ist sehr niedrig. Ohne neue Belastung sinkt die Fitness langsam.',
         Color(0xFF0EA5E9),
         Icons.bedtime_outlined,
       );

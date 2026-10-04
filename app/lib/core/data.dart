@@ -35,6 +35,11 @@ final streamsProvider =
   return Json.from(r.data as Map);
 });
 
+final profileProvider = FutureProvider.autoDispose<Json>((ref) async {
+  final r = await ref.watch(apiProvider).dio.get('/profile');
+  return Json.from(r.data as Map);
+});
+
 final stravaStatusProvider = FutureProvider.autoDispose<Json>((ref) async {
   final r = await ref.watch(apiProvider).dio.get('/integrations/strava/status');
   return Json.from(r.data as Map);

@@ -29,10 +29,30 @@
   <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
 
+  <meta name="theme-color" content="#0B7A55">
   <title>Training Planner</title>
   <link rel="manifest" href="manifest.json">
+  <style>
+    html, body { margin: 0; height: 100%; background: #F4F6F8; }
+    @media (prefers-color-scheme: dark) { html, body { background: #0E1116; } }
+    #splash { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; }
+    #splash .logo {
+      width: 64px; height: 64px; border-radius: 20px;
+      background: linear-gradient(135deg, #0FA968, #3B82F6);
+      animation: pulse 1.4s ease-in-out infinite;
+    }
+    @keyframes pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(.88); opacity: .7; } }
+  </style>
 </head>
 <body>
+  <div id="splash"><div class="logo"></div></div>
+  <script>
+    // Ladeanimation entfernen, sobald Flutter das erste Bild gezeichnet hat
+    window.addEventListener('flutter-first-frame', function () {
+      var s = document.getElementById('splash');
+      if (s) s.remove();
+    });
+  </script>
   <!--
     You can customize the "flutter_bootstrap.js" script.
     This is useful to provide a custom configuration to the Flutter loader

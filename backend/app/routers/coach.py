@@ -8,9 +8,11 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from ..coach.agent import CoachError, run_coach
+from ..coach.form_hint import form_hint
 from ..config import get_settings
 from ..db import get_db
-from ..models import CoachMessage, User
+from ..coach.tools import active_memories
+from ..models import CoachMemory, CoachMessage, User
 from ..security import current_user
 
 router = APIRouter(prefix="/coach", tags=["coach"])
@@ -112,6 +114,33 @@ def status(user: User = Depends(current_user)):
     s = get_settings()
     return {"configured": bool(s.anthropic_api_key), "chat_model": s.coach_chat_model,
             "planning_model": s.coach_planning_model}
+
+
+class MemoryOut(BaseModel):
+    id: int
+    text: str
+    valid_until: dt.date | None = None
+
+
+@router.get("/memories", response_model=list[MemoryOut])
+def memories(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Was sich der Coach ueber den Athleten gemerkt hat (nur gueltige Eintraege)."""
+    return [MemoryOut(id=m.id, text=m.text, valid_until=m.valid_until) for m in active_memories(db, user.id)]
+
+
+@router.delete("/memories/{memory_id}", status_code=204)
+def forget(memory_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    m = db.get(CoachMemory, memory_id)
+    if m is None or m.user_id != user.id:
+        raise HTTPException(404, "Eintrag nicht gefunden")
+    db.delete(m)
+    db.commit()
+
+
+@router.get("/form-hint")
+def form_hint_text(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Formhinweis fuer die Uebersicht, abgestimmt auf das Gespraech. text ist null, wenn es keinen gibt."""
+    return {"text": form_hint(db, user)}
 
 
 @router.get("/messages", response_model=list[MessageOut])

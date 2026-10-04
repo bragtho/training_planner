@@ -92,6 +92,10 @@ class _CoachScreenState extends ConsumerState<CoachScreen> {
         _messages.removeLast(); // vorlaeufige Nachricht durch gespeicherte ersetzen
         _messages.addAll(out);
       });
+      // Formhinweis und Gedaechtnis richten sich nach dem Gespraech
+      ref
+        ..invalidate(formHintProvider)
+        ..invalidate(coachMemoriesProvider);
       if ((out.last['actions'] as List).isNotEmpty) {
         ref
           ..invalidate(calendarProvider)
@@ -126,6 +130,7 @@ class _CoachScreenState extends ConsumerState<CoachScreen> {
     if (ok != true) return;
     try {
       await ref.read(apiProvider).dio.delete('/coach/messages');
+      ref.invalidate(formHintProvider);
       if (mounted) setState(_messages.clear);
     } catch (e) {
       if (mounted) setState(() => _error = errorMessage(e));
@@ -436,6 +441,8 @@ class _ThinkingState extends State<_Thinking> with SingleTickerProviderStateMixi
   }
 }
 
+bool _isMemoryAction(String a) => a.startsWith('Gemerkt:') || a.startsWith('Vergessen:');
+
 class _Bubble extends StatelessWidget {
   const _Bubble({required this.m});
   final Json m;
@@ -474,11 +481,12 @@ class _Bubble extends StatelessWidget {
               for (final a in actions)
                 InkWell(
                   borderRadius: BorderRadius.circular(Radii.sm),
-                  onTap: () => context.go('/calendar'),
+                  onTap: () => context.go(_isMemoryAction(a) ? '/profile' : '/calendar'),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 4),
                     child: Row(mainAxisSize: MainAxisSize.min, children: [
-                      const Icon(Icons.event_available_rounded, size: 16, color: AppColors.completed),
+                      Icon(_isMemoryAction(a) ? Icons.auto_awesome : Icons.event_available_rounded,
+                          size: 16, color: AppColors.completed),
                       const SizedBox(width: 6),
                       Flexible(
                         child: Text(a,

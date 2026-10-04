@@ -294,3 +294,251 @@ def test_failed_run_leaves_no_history(monkeypatch):
     assert c.get("/coach/messages", headers=h).json() == []
     with SessionLocal() as db:
         assert db.scalar(select(CoachMessage)) is None
+
+
+# ------------------------------------------------------------------ Formhinweis ---
+
+
+def seed_rides(db, u, days_ago_from=30, days_ago_to=60):
+    """Fahrten nur vor 30-60 Tagen: heute ist die Form daher hoch (lange kein Training)."""
+    for i in range(days_ago_from, days_ago_to + 1):
+        db.add(Activity(user_id=u.id, source="strava", external_id=str(i), sport="Ride", tss=70.0, duration_s=3600,
+                        start_time=dt.datetime.combine(dt.date.today() - dt.timedelta(days=i), dt.time(8))))
+    db.commit()
+
+
+def add_chat(db, u, *texts):
+    for i, t in enumerate(texts):
+        db.add(CoachMessage(user_id=u.id, role="user" if i % 2 == 0 else "assistant", content={"text": t}))
+    db.commit()
+
+
+def test_form_hint_uses_chat_and_is_cached():
+    from app.coach import form_hint as fh
+
+    fh._cache.clear()
+    fake = FakeClient(msg(text("Du bist bewusst in der Offseason, die hohe Frische ist gewollt.")),
+                      msg(text("Zweiter Text.")))
+    with SessionLocal() as db:
+        u = make_user(db)
+        seed_rides(db, u)
+        add_chat(db, u, "Ich bin in der Offseason und trainiere ab dem ersten Montag im November strukturiert.",
+                 "Alles klar, dann ruhig angehen.")
+        t1 = fh.form_hint(db, u, client=fake)
+        t2 = fh.form_hint(db, u, client=fake)  # gleicher Zustand: aus dem Zwischenspeicher
+        assert t1 == t2 == "Du bist bewusst in der Offseason, die hohe Frische ist gewollt."
+        assert len(fake.calls) == 1
+
+        prompt = fake.calls[0]["messages"][0]["content"]
+        assert "Offseason" in prompt and "ersten Montag im November" in prompt and "Gran Fondo" in prompt
+        assert "TSB" in prompt and fake.calls[0]["model"] == get_settings().coach_chat_model
+        assert "widersprechen" in fake.calls[0]["system"]
+
+        add_chat(db, u, "Ich bin krank geworden.")  # neue Nachricht -> neuer Text
+        assert fh.form_hint(db, u, client=fake) == "Zweiter Text."
+        assert len(fake.calls) == 2
+
+
+def test_form_hint_without_context_or_data_makes_no_call():
+    from app.coach import form_hint as fh
+
+    fh._cache.clear()
+    fake = FakeClient()
+    with SessionLocal() as db:
+        u = make_user(db)
+        u.profile.goals = None
+        db.commit()
+        seed_rides(db, u)
+        assert fh.form_hint(db, u, client=fake) is None  # weder Gespraech noch Ziele
+        add_chat(db, u, "Hallo")
+        db.query(Activity).delete()
+        db.commit()
+        assert fh.form_hint(db, u, client=fake) is None  # keine Trainingsdaten
+    assert fake.calls == []
+
+
+def test_form_hint_errors_return_none_and_are_not_cached():
+    from app.coach import form_hint as fh
+
+    fh._cache.clear()
+
+    @contextmanager
+    def boom(**kw):
+        raise anthropic.APIConnectionError(request=httpx.Request("POST", "https://x"))
+        yield
+
+    broken = NS(messages=NS(stream=boom))
+    with SessionLocal() as db:
+        u = make_user(db)
+        seed_rides(db, u)
+        add_chat(db, u, "Offseason bis November.")
+        assert fh.form_hint(db, u, client=broken) is None
+        ok = FakeClient(msg(text("**Ruhig** angehen.")))
+        assert fh.form_hint(db, u, client=ok) == "Ruhig angehen."  # Fehler wurde nicht gemerkt, Markdown entfernt
+
+
+def test_form_hint_text_is_shortened_cleanly():
+    from app.coach.form_hint import MAX_LEN, _clean
+
+    long = "Das ist ein Satz. " * 40
+    out = _clean(long)
+    assert len(out) <= MAX_LEN and out.endswith(".")
+    assert _clean("Eins   \n zwei") == "Eins zwei"
+
+
+def test_form_hint_endpoint(monkeypatch):
+    from app.coach import form_hint as fh
+
+    fh._cache.clear()
+    c = TestClient(app)
+    tok = c.post("/auth/register", json={"email": "hint@example.com", "password": "geheim123"}).json()["access_token"]
+    h = {"Authorization": f"Bearer {tok}"}
+    assert c.get("/coach/form-hint").status_code == 401
+    monkeypatch.setattr(get_settings(), "anthropic_api_key", "")
+    assert c.get("/coach/form-hint", headers=h).json() == {"text": None}
+    monkeypatch.setattr(get_settings(), "anthropic_api_key", "sk-test")
+    monkeypatch.setattr("app.routers.coach.form_hint", lambda db, user: "Offseason ist gewollt.")
+    assert c.get("/coach/form-hint", headers=h).json() == {"text": "Offseason ist gewollt."}
+
+
+# -------------------------------------------------------------------- Gedaechtnis ---
+
+IN_10_DAYS = (dt.date.today() + dt.timedelta(days=10)).isoformat()
+YESTERDAY = (dt.date.today() - dt.timedelta(days=1)).isoformat()
+
+
+def test_coach_saves_updates_and_forgets_memories_on_its_own():
+    from app.models import CoachMemory
+
+    fake = FakeClient(
+        msg(tool("m1", "save_memory", text="Offseason, strukturiertes Training ab Montag im November.", valid_until=IN_10_DAYS),
+            tool("m2", "save_memory", text="Trainiert am liebsten morgens."), stop="tool_use"),
+        msg(text("Habe ich mir gemerkt.")),
+    )
+    with SessionLocal() as db:
+        u = make_user(db)
+        r = run(db, u, fake, "Ich bin in der Offseason und fahre lieber morgens.")
+        mems = db.scalars(select(CoachMemory).order_by(CoachMemory.id)).all()
+        assert [m.text for m in mems] == ["Offseason, strukturiertes Training ab Montag im November.", "Trainiert am liebsten morgens."]
+        assert mems[0].valid_until.isoformat() == IN_10_DAYS and mems[1].valid_until is None
+        assert r["actions"][0].startswith("Gemerkt: Offseason") and len(r["actions"]) == 2
+
+        # Naechste Anfrage: Gedaechtnis steht im Kontext (mit ids), Aktualisieren und Vergessen funktionieren
+        fake2 = FakeClient(
+            msg(tool("u", "save_memory", id=mems[1].id, text="Trainiert am liebsten abends."),
+                tool("f", "forget_memory", id=mems[0].id), stop="tool_use"),
+            msg(text("Angepasst.")),
+        )
+        r2 = run(db, u, fake2, "Doch lieber abends, und die Offseason ist vorbei.")
+        ctx = fake2.calls[0]["system"][1]["text"]
+        assert f"[{mems[0].id}] Offseason" in ctx and f"(gilt bis {IN_10_DAYS})" in ctx and "Gedaechtnis" in ctx
+        left = db.scalars(select(CoachMemory)).all()
+        assert [m.text for m in left] == ["Trainiert am liebsten abends."]
+        assert r2["actions"][1].startswith("Vergessen: Offseason")
+    assert "Gedaechtnis" in fake.calls[0]["system"][0]["text"]  # Anweisung im (gecachten) Systemprompt
+    assert {t["name"] for t in fake.calls[0]["tools"]} >= {"save_memory", "forget_memory"}
+
+
+def test_memory_tool_validation_dedup_limit_and_isolation():
+    from app.coach import tools as T
+    from app.models import CoachMemory
+
+    with SessionLocal() as db:
+        a = make_user(db, "a@example.com")
+        b = make_user(db, "b@example.com")
+        first = T.save_memory(db, a, {"text": "Mag keine Rolle  ", "valid_until": IN_10_DAYS})
+        again = T.save_memory(db, a, {"text": "mag keine rolle"})  # gleicher Fakt, andere Schreibweise
+        assert again["note"] == "Eintrag existierte bereits" and db.query(CoachMemory).count() == 1
+        assert first["saved"].endswith(f"(gilt bis {IN_10_DAYS})")
+
+        for bad, msg_part in [({"text": ""}, "leer"), ({"text": "x" * 301}, "laenger"),
+                              ({"text": "ok", "valid_until": YESTERDAY}, "Vergangenheit"),
+                              ({"text": "ok", "valid_until": "morgen"}, "kein Datum"),
+                              ({"text": "ok", "id": 999}, "nicht gefunden")]:
+            with pytest.raises(T.ToolError, match=msg_part):
+                T.save_memory(db, a, bad)
+
+        mem_id = db.scalar(select(CoachMemory.id))
+        with pytest.raises(T.ToolError, match="nicht gefunden"):  # fremder Nutzer
+            T.save_memory(db, b, {"text": "gehackt", "id": mem_id})
+        with pytest.raises(T.ToolError, match="nicht gefunden"):
+            T.forget_memory(db, b, {"id": mem_id})
+        assert db.get(CoachMemory, mem_id).text == "Mag keine Rolle"
+
+        for i in range(T.MAX_MEMORIES - 1):
+            T.save_memory(db, a, {"text": f"Fakt {i}"})
+        with pytest.raises(T.ToolError, match="voll"):
+            T.save_memory(db, a, {"text": "Einer zu viel"})
+        T.save_memory(db, a, {"text": "Ersetzt", "id": mem_id})  # Aktualisieren geht auch bei vollem Gedaechtnis
+        assert db.get(CoachMemory, mem_id).valid_until is None
+        assert T.active_memories(db, b.id) == []
+
+
+def test_expired_memories_are_ignored():
+    from app.coach import tools as T
+    from app.models import CoachMemory
+
+    with SessionLocal() as db:
+        u = make_user(db)
+        db.add_all([CoachMemory(user_id=u.id, text="Alt", valid_until=dt.date.today() - dt.timedelta(days=1)),
+                    CoachMemory(user_id=u.id, text="Heute noch gueltig", valid_until=dt.date.today()),
+                    CoachMemory(user_id=u.id, text="Dauerhaft")])
+        db.commit()
+        assert [m.text for m in T.active_memories(db, u.id)] == ["Heute noch gueltig", "Dauerhaft"]
+        assert "Alt" not in agent.build_context(db, u).split("Gedaechtnis")[1]
+        assert "noch leer" in agent.build_context(db, make_user(db, "leer@example.com"))
+
+
+def test_memory_endpoints():
+    from app.models import CoachMemory
+
+    c = TestClient(app)
+    h1 = {"Authorization": "Bearer " + c.post("/auth/register", json={"email": "m1@example.com", "password": "geheim123"}).json()["access_token"]}
+    h2 = {"Authorization": "Bearer " + c.post("/auth/register", json={"email": "m2@example.com", "password": "geheim123"}).json()["access_token"]}
+    assert c.get("/coach/memories").status_code == 401
+    with SessionLocal() as db:
+        uid = db.scalar(select(User.id).where(User.email == "m1@example.com"))
+        db.add_all([CoachMemory(user_id=uid, text="Offseason", valid_until=dt.date.today() + dt.timedelta(days=3)),
+                    CoachMemory(user_id=uid, text="Abgelaufen", valid_until=dt.date.today() - dt.timedelta(days=3))])
+        db.commit()
+    got = c.get("/coach/memories", headers=h1).json()
+    assert [m["text"] for m in got] == ["Offseason"] and got[0]["valid_until"] == (dt.date.today() + dt.timedelta(days=3)).isoformat()
+    assert c.get("/coach/memories", headers=h2).json() == []
+    assert c.delete(f"/coach/memories/{got[0]['id']}", headers=h2).status_code == 404  # fremder Eintrag
+    assert c.delete(f"/coach/memories/{got[0]['id']}", headers=h1).status_code == 204
+    assert c.get("/coach/memories", headers=h1).json() == []
+
+
+def test_form_hint_uses_memory_even_without_chat_or_goals():
+    from app.coach import form_hint as fh
+    from app.coach import tools as T
+
+    fh._cache.clear()
+    fake = FakeClient(msg(text("Offseason: die hohe Frische ist gewollt.")))
+    with SessionLocal() as db:
+        u = make_user(db)
+        u.profile.goals = None
+        db.commit()
+        seed_rides(db, u)
+        assert fh.form_hint(db, u, client=FakeClient()) is None  # ohne Gedaechtnis kein Kontext
+        T.save_memory(db, u, {"text": "Offseason bis zum ersten Montag im November.", "valid_until": IN_10_DAYS})
+        assert fh.form_hint(db, u, client=fake) == "Offseason: die hohe Frische ist gewollt."
+    assert "Offseason bis zum ersten Montag" in fake.calls[0]["messages"][0]["content"]
+
+
+def test_form_hint_truncated_text_is_cut_to_last_full_sentence():
+    from app.coach import form_hint as fh
+
+    fh._cache.clear()
+    cut = FakeClient(msg(text("Die Offseason ist gewollt. Genieß die Pause mit lockeren Fahrten, am ersten Mont"), stop="max_tokens"),
+                     msg(text("Halber Satz ohne Ende"), stop="max_tokens"))
+    with SessionLocal() as db:
+        u = make_user(db)
+        seed_rides(db, u)
+        add_chat(db, u, "Offseason bis November.")
+        assert fh.form_hint(db, u, client=cut) == "Die Offseason ist gewollt."  # nie ein halber Satz
+        k = cut.calls[0]
+        # "disabled" lehnt das Modell mit 400 ab, deshalb between_tools; grosses Limit gegen Abbrueche
+        assert k["thinking"] == {"type": "between_tools"} and k["max_tokens"] >= 4000
+        fh._cache.clear()
+        assert fh.form_hint(db, u, client=cut) is None  # gar kein vollstaendiger Satz: Standardtext der App

@@ -99,3 +99,15 @@ class CoachMessage(Base):
     role: Mapped[str] = mapped_column(String(10))  # user | assistant
     content: Mapped[list | str] = mapped_column(JSON)  # Anthropic-Content-Bloecke
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)
+
+
+class CoachMemory(Base):
+    """Was der Coach sich langfristig ueber den Athleten merkt (Vorlieben, Saisonphase, Einschraenkungen ...)."""
+
+    __tablename__ = "coach_memories"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    text: Mapped[str] = mapped_column(String(300))
+    valid_until: Mapped[date | None] = mapped_column(Date)  # zeitlich begrenzte Fakten, z. B. Offseason
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)

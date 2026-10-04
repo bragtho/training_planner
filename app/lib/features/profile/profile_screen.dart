@@ -6,6 +6,7 @@ import '../../core/auth.dart';
 import '../../core/data.dart';
 import '../../core/theme.dart';
 import '../../core/ui.dart';
+import 'memory_card.dart';
 import 'strava_card.dart';
 
 class ProfileScreen extends ConsumerWidget {
@@ -156,6 +157,8 @@ class _ProfileFormState extends ConsumerState<_ProfileForm> {
           final form = _buildForm(context);
           final side = Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             const StravaCard(),
+            const SizedBox(height: Gap.md),
+            const CoachMemoryCard(),
             const SizedBox(height: Gap.md),
             _ZonesCard(zones: zones),
           ]);

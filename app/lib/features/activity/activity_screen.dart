@@ -11,6 +11,7 @@ import '../../core/charts.dart';
 import '../../core/data.dart';
 import '../../core/theme.dart';
 import '../../core/ui.dart';
+import 'activity_analysis.dart';
 
 class ActivityScreen extends ConsumerWidget {
   const ActivityScreen({super.key, required this.id});
@@ -47,6 +48,7 @@ class ActivityScreen extends ConsumerWidget {
             data: (a) => _Header(a: a),
           ),
           const SizedBox(height: Gap.xl),
+          ActivityAnalysisSection(id: id),
           streams.when(
             loading: () => SurfaceCard(
               child: Row(children: [

@@ -78,6 +78,8 @@ class _CoachScreenState extends ConsumerState<CoachScreen> {
         switch (quick) {
           'plan_week' => 'Woche planen',
           'plan_season' => 'Saisonplan erstellen',
+          'check_load' => 'Trainiere ich zu viel oder zu wenig?',
+          'check_ftp' => 'Stimmt meine FTP noch?',
           _ => 'Letztes Training auswerten',
         };
     setState(() {
@@ -233,6 +235,18 @@ class _CoachScreenState extends ConsumerState<CoachScreen> {
                               label: const Text('Letztes Training auswerten'),
                               onPressed: canSend ? () => _send(quick: 'review_last') : null,
                             ),
+                            const SizedBox(width: Gap.sm),
+                            ActionChip(
+                              avatar: const Icon(Icons.monitor_heart_outlined, size: 18),
+                              label: const Text('Belastung prüfen'),
+                              onPressed: canSend ? () => _send(quick: 'check_load') : null,
+                            ),
+                            const SizedBox(width: Gap.sm),
+                            ActionChip(
+                              avatar: const Icon(Icons.bolt_rounded, size: 18),
+                              label: const Text('FTP prüfen'),
+                              onPressed: canSend ? () => _send(quick: 'check_ftp') : null,
+                            ),
                           ],
                         ),
                       ),
@@ -349,8 +363,10 @@ class _Intro extends StatelessWidget {
           () => onQuick('plan_season')),
       (Icons.fact_check_outlined, 'Letztes Training auswerten', 'Was lief gut, was kann besser werden?',
           () => onQuick('review_last')),
-      (Icons.battery_charging_full_rounded, 'Brauche ich Erholung?', 'Einschätzung anhand Deiner Form',
-          () => onAsk('Brauche ich gerade einen Ruhetag?')),
+      (Icons.monitor_heart_outlined, 'Zu viel oder zu wenig?', 'Belastung, Form und Plan im Vergleich',
+          () => onQuick('check_load')),
+      (Icons.bolt_rounded, 'Stimmt meine FTP?', 'Prüfung anhand Deiner besten Leistungen',
+          () => onQuick('check_ftp')),
       (Icons.emoji_events_outlined, 'Auf ein Event vorbereiten', 'Aufbau bis zum Wettkampf',
           () => onAsk('Wie bereite ich mich am besten auf mein nächstes Event vor?')),
     ];

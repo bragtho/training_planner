@@ -11,6 +11,7 @@ import '../../core/charts.dart';
 import '../../core/data.dart';
 import '../../core/theme.dart';
 import '../../core/ui.dart';
+import 'load_ftp_cards.dart';
 
 DateTime _today() {
   final n = DateTime.now();
@@ -31,7 +32,9 @@ class DashboardScreen extends ConsumerWidget {
         ..invalidate(pmcProvider)
         ..invalidate(activitiesProvider)
         ..invalidate(calendarProvider)
-        ..invalidate(formHintProvider);
+        ..invalidate(formHintProvider)
+        ..invalidate(loadCheckProvider)
+        ..invalidate(ftpCheckProvider);
       await ref.read(pmcProvider.future);
     }
 
@@ -160,6 +163,8 @@ class _Overview extends StatelessWidget {
             ),
           ],
         ),
+        const SizedBox(height: Gap.md),
+        const _Columns(leftFlex: 1, rightFlex: 1, left: LoadCard(), right: FtpCard()),
         const SizedBox(height: Gap.md),
         const _SeasonCard(),
         _Columns(

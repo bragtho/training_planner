@@ -211,6 +211,11 @@ def upsert_activity(db: Session, user_id: int, d: dict, profile: AthleteProfile)
             fields.pop(k)
     for k, v in fields.items():
         setattr(act, k, v)
+    if d.get("workout_type") is not None:  # 11 = Rennen; fuer die Analyse gemerkt
+        from ..insights import set_workout_type  # spaet importiert: insights nutzt dieses Modul
+
+        db.flush()
+        set_workout_type(db, act, d["workout_type"])
     return created
 
 
@@ -222,6 +227,7 @@ def sync_activities(
     after = None if full else integ.sync_cursor
     newest = integ.sync_cursor or 0
     created = updated = 0
+    new_ext: list[str] = []
     for page in range(1, MAX_PAGES + 1):
         items = client.list_activities(after, page)
         if not items:
@@ -232,6 +238,7 @@ def sync_activities(
                 continue
             if upsert_activity(db, integ.user_id, d, profile):
                 created += 1
+                new_ext.append(str(d["id"]))
             else:
                 updated += 1
         db.commit()
@@ -239,7 +246,9 @@ def sync_activities(
             break
     integ.sync_cursor = newest or None
     db.commit()
-    return {"imported": created, "updated": updated}
+    new_ids = list(db.scalars(select(Activity.id).where(
+        Activity.user_id == integ.user_id, Activity.source == "strava", Activity.external_id.in_(new_ext)))) if new_ext else []
+    return {"imported": created, "updated": updated, "new_ids": new_ids}
 
 
 def resample_1hz(time_s: list[int], values: list[float], max_hold_s: int = 5) -> list[float]:
@@ -294,6 +303,9 @@ def handle_webhook_event(db: Session, event: dict, http: httpx.Client | None = N
             )
         )
         if act:
+            from ..insights import delete_for
+
+            delete_for(db, act)
             db.delete(act)
             db.commit()
         return "deleted"

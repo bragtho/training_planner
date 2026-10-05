@@ -76,6 +76,21 @@ class Activity(Base):
     planned_workout_id: Mapped[int | None] = mapped_column(ForeignKey("planned_workouts.id"))
 
 
+class ActivityInsight(Base):
+    """Analyse einer Aktivitaet: Kennzahlen aus den Sensordaten und das Feedback des Coaches (eigene Tabelle,
+    weil sich Spalten an bestehenden Tabellen ohne Migration nicht ergaenzen lassen)."""
+
+    __tablename__ = "activity_insights"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    activity_id: Mapped[int] = mapped_column(ForeignKey("activities.id"), unique=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    workout_type: Mapped[int | None] = mapped_column(Integer)  # Strava: 11 = Rennen, 12 = Workout
+    metrics: Mapped[dict | None] = mapped_column(JSON)  # siehe app/metrics/analysis.py (ride_metrics)
+    feedback: Mapped[dict | None] = mapped_column(JSON)  # Feedback des Coaches (headline, summary, ...)
+    feedback_status: Mapped[str] = mapped_column(String(10), default="none")  # none | done | failed
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
 class PlannedWorkout(Base):
     __tablename__ = "planned_workouts"
     id: Mapped[int] = mapped_column(primary_key=True)

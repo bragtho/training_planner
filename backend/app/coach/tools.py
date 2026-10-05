@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from ..metrics.fitness import current_status, pmc_rows, weekly_summary
 from ..metrics.power import power_zones
 from .. import atp as A
+from .. import insights as I
 from .. import knowledge as K
 from ..models import Activity, AtpWeek, CoachMemory, PlannedWorkout, User
 from ..routers.plans import WorkoutIn, _apply, calendar_data
@@ -75,7 +76,8 @@ TOOLS: list[dict] = [
     },
     {
         "name": "get_recent_activities",
-        "description": "Absolvierte Fahrten der letzten Tage mit Dauer, Distanz, Leistung, NP, IF, TSS, Puls. Neueste zuerst.",
+        "description": "Absolvierte Fahrten der letzten Tage mit ID, Dauer, Distanz, Leistung, NP, IF, TSS, Puls. Neueste zuerst. "
+                       "Details zu einer Fahrt liefert get_activity_analysis.",
         "input_schema": {"type": "object", "properties": {"days": {"type": "integer", "description": "Zeitraum in Tagen (1-90), Standard 14"}}},
     },
     {
@@ -244,6 +246,29 @@ TOOLS: list[dict] = [
         "description": "Loescht einen Eintrag aus Deinem Gedaechtnis, wenn er ueberholt oder widerrufen ist oder der Athlet es verlangt.",
         "input_schema": {"type": "object", "properties": {"id": {"type": "integer"}}, "required": ["id"]},
     },
+    {
+        "name": "get_activity_analysis",
+        "description": "Ausfuehrliche Analyse einer absolvierten Fahrt: Art (Grundlage, Intervalle, Rennen ...), Zeit in Zonen, Bestwerte, "
+                       "Belastungsabschnitte, Pacing, Pw:HR-Entkopplung, Soll/Ist gegen das geplante Training (je Intervall), Form vor der Fahrt, "
+                       "Saisonphase und das bereits gegebene Feedback. Ohne Angabe die neueste Fahrt.",
+        "input_schema": {"type": "object", "properties": {
+            "activity_id": {"type": "integer", "description": "ID aus get_recent_activities oder get_calendar"},
+            "date": {"type": "string", "description": "Alternativ: Datum YYYY-MM-DD (letzte Fahrt dieses Tages)"},
+        }},
+    },
+    {
+        "name": "get_load_assessment",
+        "description": "Bewertung der Trainingsbelastung: Urteil (too_much, slightly_much, ok, too_little, mixed, unknown) mit Hinweisen "
+                       "(CTL-Anstieg, TSB, Lastspitze, Monotonie, Soll/Ist der letzten 14 Tage, Wochenziel, Efficiency-Factor-Trend), "
+                       "Intensitaetsverteilung der letzten 28 Tage und naechstes Event.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "get_ftp_assessment",
+        "description": "Prueft, ob die eingestellte FTP zu den Leistungen der letzten 90 Tage passt (Bestwerte 20/30/60 min, NP langer Fahrten, "
+                       "Critical Power). Empfehlung raise (mit suggested_ftp), ok oder test. Laedt dafuer Sensordaten harter Fahrten nach.",
+        "input_schema": {"type": "object", "properties": {}},
+    }
 ]
 
 
@@ -339,7 +364,7 @@ def get_recent_activities(db: Session, user: User, args: dict) -> dict:
         .order_by(Activity.start_time.desc()).limit(60)
     )
     return {"activities": [
-        {"date": a.start_time.date().isoformat(), "name": a.name, "duration_min": round(a.duration_s / 60),
+        {"id": a.id, "date": a.start_time.date().isoformat(), "name": a.name, "duration_min": round(a.duration_s / 60),
          "distance_km": round(a.distance_m / 1000, 1), "elevation_m": round(a.elevation_m) if a.elevation_m else None,
          "avg_power_w": round(a.avg_power) if a.avg_power else None, "np_w": round(a.norm_power) if a.norm_power else None,
          "if": round(a.intensity_factor, 2) if a.intensity_factor else None,
@@ -576,11 +601,49 @@ def get_knowledge(db: Session, user: User, args: dict) -> dict:
     return K.cards_for_tool(db, ids, topic)
 
 
+def _activity_arg(db: Session, user: User, args: dict) -> Activity:
+    q = select(Activity).where(Activity.user_id == user.id)
+    if args.get("activity_id") is not None:
+        a = db.get(Activity, _int(args.get("activity_id"), 0, 0, 2**31 - 1))
+        if a is None or a.user_id != user.id:
+            raise ToolError("Aktivitaet nicht gefunden")
+        return a
+    if args.get("date"):
+        day = _date(args["date"], "date")
+        start = dt.datetime.combine(day, dt.time.min)
+        q = q.where(Activity.start_time >= start, Activity.start_time < start + dt.timedelta(days=1))
+    a = db.scalar(q.order_by(Activity.start_time.desc()).limit(1))
+    if a is None:
+        raise ToolError("Keine Fahrt gefunden" + (f" am {args['date']}" if args.get("date") else ""))
+    return a
+
+
+def get_activity_analysis(db: Session, user: User, args: dict) -> dict:
+    act = _activity_arg(db, user, args)
+    report = I.activity_report(db, user, act)
+    row = I.insight_row(db, act)
+    db.commit()
+    if row.feedback:
+        report["feedback_given"] = {k: row.feedback.get(k) for k in ("headline", "summary", "execution", "load_fit", "next", "ftp_hint")}
+    return report
+
+
+def get_load_assessment(db: Session, user: User, args: dict) -> dict:
+    return I.load_report(db, user)
+
+
+def get_ftp_assessment(db: Session, user: User, args: dict) -> dict:
+    return I.ftp_report(db, user, backfill=I.BACKFILL_DEFAULT)
+
+
 HANDLERS = {
     "get_athlete_profile": get_athlete_profile,
     "get_fitness_status": get_fitness_status,
     "get_recent_activities": get_recent_activities,
     "get_calendar": get_calendar,
+    "get_activity_analysis": get_activity_analysis,
+    "get_load_assessment": get_load_assessment,
+    "get_ftp_assessment": get_ftp_assessment,
     "create_workouts": create_workouts,
     "update_workout": update_workout,
     "delete_workout": delete_workout,

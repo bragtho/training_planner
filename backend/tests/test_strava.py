@@ -85,8 +85,8 @@ def test_sync_imports_only_rides_and_is_idempotent():
         r2 = strava.sync_activities(db, integ, p, full=True, http=_mock(handler))
         count = len(db.scalars(select(Activity)).all())
         cursor = integ.sync_cursor
-    assert r1 == {"imported": 1, "updated": 0}
-    assert r2 == {"imported": 0, "updated": 1}
+    assert r1 == {"imported": 1, "updated": 0, "new_ids": [1]}
+    assert r2 == {"imported": 0, "updated": 1, "new_ids": []}
     assert count == 1
     assert cursor == int(datetime(2026, 9, 2, 6, tzinfo=timezone.utc).timestamp())
 

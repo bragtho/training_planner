@@ -110,7 +110,7 @@ class _Overview extends StatelessWidget {
     num weekAgo(String k) => rows.length > 7 ? rows[rows.length - 8][k] as num : rows.first[k] as num;
     final ctl = cur['ctl'] as num, atl = cur['atl'] as num, tsb = cur['tsb'] as num;
 
-    // Reihenfolge nach Bedeutung: Zustand, heutiges Training, Woche, danach Verlauf und letzte Fahrten
+    // Reihenfolge nach Bedeutung: Zustand, heutiges Training, Woche, danach Verlauf und letzte Aktivitäten
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -561,8 +561,7 @@ class _RecentActivities extends ConsumerWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         SectionHeader(
-          title: 'Letzte Fahrten',
-          subtitle: 'Mit Feedback Deines Coaches',
+          title: 'Letzte Aktivitäten',
           trailing: TextButton(onPressed: () => context.go('/calendar'), child: const Text('Kalender')),
         ),
         acts.when(

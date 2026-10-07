@@ -542,3 +542,22 @@ def test_form_hint_truncated_text_is_cut_to_last_full_sentence():
         assert k["thinking"] == {"type": "between_tools"} and k["max_tokens"] >= 4000
         fh._cache.clear()
         assert fh.form_hint(db, u, client=cut) is None  # gar kein vollstaendiger Satz: Standardtext der App
+
+
+def test_coach_creates_strength_workout():
+    structure = [
+        {"type": "exercise", "name": "Kniebeuge", "sets": 3, "reps": 8, "rest_s": 120, "load": "RPE 7"},
+        {"type": "exercise", "name": "Plank", "sets": 3, "duration_s": 45, "rest_s": 30},
+    ]
+    fake = FakeClient(
+        msg(tool("t1", "create_workouts", workouts=[{"date": TOMORROW, "title": "Kraft Beine und Rumpf", "structure": structure}]), stop="tool_use"),
+        msg(text("Ich habe Dir morgen ein Krafttraining eingeplant.")),
+    )
+    with SessionLocal() as db:
+        u = make_user(db)
+        r = run(db, u, fake)
+        w = db.scalar(select(PlannedWorkout))
+        assert w.created_by == "coach" and w.planned_tss is None and w.planned_duration_s == 597
+        assert w.structure[0]["name"] == "Kniebeuge" and w.structure[1]["duration_s"] == 45
+    assert r["actions"] == ["1 Training(s) angelegt"]
+    assert "Krafttraining" in agent.SYSTEM_PROMPT

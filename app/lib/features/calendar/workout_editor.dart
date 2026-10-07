@@ -12,6 +12,7 @@ import '../../core/data.dart';
 import '../../core/theme.dart';
 import '../../core/ui.dart';
 import 'step_node.dart';
+import 'strength_plan.dart';
 
 class WorkoutEditorScreen extends ConsumerStatefulWidget {
   const WorkoutEditorScreen({super.key, this.id, this.initialDate});
@@ -29,6 +30,9 @@ class _WorkoutEditorScreenState extends ConsumerState<WorkoutEditorScreen> {
   final _manualTss = TextEditingController();
   late DateTime _date = widget.initialDate ?? DateTime.now();
   List<StepNode> _steps = [];
+  List<Json>? _strength; // Krafttraining: Uebungen (hier nur angezeigt, der Coach plant sie)
+  num? _strengthDuration;
+  bool _done = false; // Krafttraining von Hand als erledigt markiert
   bool _skipped = false;
   bool _loading = false;
   bool _saving = false;
@@ -65,7 +69,14 @@ class _WorkoutEditorScreenState extends ConsumerState<WorkoutEditorScreen> {
       _desc.text = (w['description'] as String?) ?? '';
       _date = DateTime.parse(w['date'] as String);
       _skipped = w['status'] == 'skipped';
+      _done = w['status'] == 'completed';
       final st = w['structure'] as List?;
+      if (w['kind'] == 'strength') {
+        _strength = [for (final s in st ?? const []) Json.from(s as Map)];
+        _strengthDuration = w['planned_duration_s'] as num?;
+        _steps = [];
+        return;
+      }
       _steps = [for (final s in st ?? const []) StepNode.fromJson(Json.from(s as Map))];
       if (st == null) {
         if (w['planned_duration_s'] != null) {
@@ -115,13 +126,13 @@ class _WorkoutEditorScreenState extends ConsumerState<WorkoutEditorScreen> {
 
   Future<void> _save() async {
     if (_title.text.trim().isEmpty) return _toast('Bitte einen Titel eingeben');
-    final structure = _structure();
+    final structure = _strength ?? _structure();
     if (structure == null) return _toast('Bitte alle Schritte prüfen (Dauer ≥ 5 s, Leistung 20–250 %)');
     final body = <String, dynamic>{
       'date': isoDay(_date),
       'title': _title.text.trim(),
       'description': _desc.text.trim().isEmpty ? null : _desc.text.trim(),
-      'status': _skipped ? 'skipped' : 'planned',
+      'status': _skipped ? 'skipped' : (_strength != null && _done ? 'completed' : 'planned'),
     };
     if (structure.isNotEmpty) {
       body['structure'] = structure;
@@ -260,6 +271,19 @@ class _WorkoutEditorScreenState extends ConsumerState<WorkoutEditorScreen> {
                           alignLabelWithHint: true,
                         ),
                       ),
+                      if (_isEdit && _strength != null) ...[
+                        const SizedBox(height: Gap.sm),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('Erledigt'),
+                          subtitle: const Text('Krafttraining kommt nicht von Strava, markiere es hier selbst'),
+                          value: _done && !_skipped,
+                          onChanged: (v) => setState(() {
+                            _done = v;
+                            if (v) _skipped = false;
+                          }),
+                        ),
+                      ],
                       if (_isEdit) ...[
                         const SizedBox(height: Gap.sm),
                         SwitchListTile(
@@ -267,13 +291,19 @@ class _WorkoutEditorScreenState extends ConsumerState<WorkoutEditorScreen> {
                           title: const Text('Ausgelassen'),
                           subtitle: const Text('Zählt nicht mehr zur geplanten Wochenbelastung'),
                           value: _skipped,
-                          onChanged: (v) => setState(() => _skipped = v),
+                          onChanged: (v) => setState(() {
+                            _skipped = v;
+                            if (v) _done = false;
+                          }),
                         ),
                       ],
                     ],
                   ),
                 ),
                 const SizedBox(height: Gap.xl),
+                if (_strength != null)
+                  StrengthPlan(exercises: _strength!, durationS: _strengthDuration)
+                else ...[
                 const SectionHeader(title: 'Vorlagen', subtitle: 'Antippen, um den Ablauf zu übernehmen'),
                 SizedBox(
                   height: 92,
@@ -383,6 +413,7 @@ class _WorkoutEditorScreenState extends ConsumerState<WorkoutEditorScreen> {
                       _changed();
                     },
                   ),
+                ],
               ],
             ),
     );

@@ -19,6 +19,8 @@ from .. import atp as A
 from .. import insights as I
 from .. import knowledge as K
 from ..models import Activity, AtpWeek, CoachMemory, PlannedWorkout, User
+from ..exercises import EXERCISES
+from ..metrics.workout import is_strength
 from ..routers.plans import WorkoutIn, _apply, calendar_data
 
 MAX_CREATE = 21
@@ -56,9 +58,29 @@ _REPEAT = {
     },
     "required": ["type", "count", "steps"],
 }
+_EXERCISE = {
+    "type": "object",
+    "properties": {
+        "type": {"type": "string", "enum": ["exercise"]},
+        "exercise_id": {
+            "type": "string", "enum": list(EXERCISES),
+            "description": "Uebung aus dem Katalog (bevorzugt, dann gibt es Anleitung und Bild in der App): "
+                           + "; ".join(f"{k} = {v['name']}{' (Halten)' if v.get('hold') else ''}" for k, v in EXERCISES.items()),
+        },
+        "name": {"type": "string", "description": "Name der Uebung; bei exercise_id optional, sonst Pflicht (freie Uebung ohne Bild)"},
+        "sets": {"type": "integer", "description": "Anzahl Saetze (1-10)"},
+        "reps": {"type": "integer", "description": "Wiederholungen je Satz (1-100); statt duration_s"},
+        "duration_s": {"type": "integer", "description": "Haltezeit je Satz in Sekunden (5-600), z. B. Plank; statt reps"},
+        "rest_s": {"type": "integer", "description": "Pause zwischen den Saetzen in Sekunden (0-600), Standard 60"},
+        "load": {"type": "string", "description": "Last, z. B. 'Koerpergewicht', 'Kurzhanteln 16 kg', 'RPE 7'"},
+        "note": {"type": "string", "description": "Ausfuehrungshinweis (kurz, optional)"},
+    },
+    "required": ["type", "sets"],
+}
 _STEPS = {
-    "type": "array", "items": {"anyOf": [_LEAF, _REPEAT]}, "minItems": 1, "maxItems": 60,
-    "description": "Ablauf des Trainings. Beispiel Sweetspot: Aufwaermen 15 min 50->75 %, 3x(15 min 90 % + 5 min 55 %), Ausfahren 10 min.",
+    "type": "array", "items": {"anyOf": [_LEAF, _REPEAT, _EXERCISE]}, "minItems": 1, "maxItems": 60,
+    "description": "Ablauf des Trainings. Beispiel Sweetspot: Aufwaermen 15 min 50->75 %, 3x(15 min 90 % + 5 min 55 %), Ausfahren 10 min. "
+                   "Krafttraining: nur exercise-Schritte (keine Mischung mit Radschritten), z. B. 3 Saetze Kniebeuge mit 10 Wiederholungen.",
 }
 _DATE = {"type": "string", "description": "Datum YYYY-MM-DD"}
 
@@ -296,6 +318,7 @@ def _workout_view(w, structure: bool = False) -> dict:
         "planned_tss": round(w.planned_tss) if w.planned_tss is not None else None,
         "actual_tss": round(w.actual_tss) if getattr(w, "actual_tss", None) is not None else None,
         "created_by": w.created_by,
+        "kind": "strength" if is_strength(w.structure) else "bike",
     }
     if w.description:
         d["description"] = w.description

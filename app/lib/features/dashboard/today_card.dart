@@ -125,7 +125,21 @@ class _Planned extends StatelessWidget {
             style: t.textTheme.bodyMedium?.copyWith(color: t.colorScheme.onSurfaceVariant),
           ),
         ]),
-        if (structure != null && structure.isNotEmpty) ...[
+        if (w['kind'] == 'strength' && structure != null) ...[
+          const SizedBox(height: Gap.md),
+          Row(children: [
+            Icon(Icons.fitness_center_rounded, size: 18, color: t.colorScheme.onSurfaceVariant),
+            const SizedBox(width: Gap.sm),
+            Expanded(
+              child: Text(
+                [for (final e in structure) (e as Map)['name']].join(' · '),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: t.textTheme.bodyMedium?.copyWith(color: t.colorScheme.onSurfaceVariant),
+              ),
+            ),
+          ]),
+        ] else if (structure != null && structure.isNotEmpty) ...[
           const SizedBox(height: Gap.md),
           WorkoutProfile(structure: structure, height: 54),
         ],
@@ -232,6 +246,7 @@ class WorkoutProfile extends StatelessWidget {
 
     for (final s in structure) {
       final m = s as Map;
+      if (m['type'] == 'exercise') continue; // Krafttraining hat kein Leistungsprofil
       if (m['type'] == 'repeat') {
         for (var i = 0; i < (m['count'] as num); i++) {
           for (final x in (m['steps'] as List)) {

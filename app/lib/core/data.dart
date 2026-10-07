@@ -55,6 +55,12 @@ final lapsProvider = FutureProvider.autoDispose.family<List<Json>, int>((ref, id
   return [for (final l in (r.data as Map)['laps'] as List) Json.from(l as Map)];
 });
 
+/// Katalog der Kraftuebungen (Kurzanleitung, Muskeln, typische Fehler), nach Kennung.
+final exerciseCatalogProvider = FutureProvider.autoDispose<Map<String, Json>>((ref) async {
+  final r = await ref.watch(apiProvider).dio.get('/exercises');
+  return {for (final e in (r.data as Map)['exercises'] as List) (e as Map)['id'] as String: Json.from(e)};
+});
+
 final profileProvider = FutureProvider.autoDispose<Json>((ref) async {
   final r = await ref.watch(apiProvider).dio.get('/profile');
   return Json.from(r.data as Map);

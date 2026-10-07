@@ -1,6 +1,6 @@
 [project]
 name = "wissens-manager"
-version = "0.1.0"
+version = "0.2.0"
 description = "Recherche, Bewertung und Pflege der Wissensbasis des Radtrainings-Coaches"
 requires-python = ">=3.11"
 dependencies = [

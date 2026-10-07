@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..exercises import catalog, match_id
+from ..metrics.sports import is_cycling, is_strength as sport_is_strength
 from ..metrics.workout import Steps, is_strength, summarize
 from ..models import Activity, PlannedWorkout, User
 from ..routers.activities import ActivityOut, _out as activity_out
@@ -96,14 +97,20 @@ def _get(db: Session, user: User, workout_id: int) -> PlannedWorkout:
     return w
 
 
-def _day_activity(db: Session, user: User, day: dt.date, taken: set[int]) -> Activity | None:
+def _fits(w: PlannedWorkout, a: Activity) -> bool:
+    """Ein Krafttraining wird nur von Krafttraining erfuellt, ein Radtraining nur von einer Radfahrt."""
+    return sport_is_strength(a.sport) if is_strength(w.structure) else is_cycling(a.sport)
+
+
+def _day_activity(db: Session, user: User, w: PlannedWorkout, taken: set[int]) -> Activity | None:
+    day = w.date
     start = dt.datetime.combine(day, dt.time.min)
     rows = db.scalars(
         select(Activity)
         .where(Activity.user_id == user.id, Activity.start_time >= start, Activity.start_time < start + dt.timedelta(days=1))
         .order_by(Activity.start_time)
     )
-    return next((a for a in rows if a.id not in taken), None)
+    return next((a for a in rows if a.id not in taken and _fits(w, a)), None)
 
 
 def calendar_data(db: Session, user: User, start: dt.date, end: dt.date) -> tuple[list[WorkoutOut], list[Activity]]:
@@ -130,7 +137,7 @@ def calendar_data(db: Session, user: User, start: dt.date, end: dt.date) -> tupl
     out = []
     for w in workouts:
         # pro Tag wird jede Aktivitaet hoechstens einem Workout zugeordnet
-        match = next((a for a in by_day.get(w.date, []) if a.id not in taken and w.status != "skipped"), None)
+        match = next((a for a in by_day.get(w.date, []) if a.id not in taken and w.status != "skipped" and _fits(w, a)), None)
         if match:
             taken.add(match.id)
         out.append(_serialize(w, match, today))
@@ -168,7 +175,7 @@ def create_workout(body: WorkoutIn, user: User = Depends(current_user), db: Sess
 @router.get("/workouts/{workout_id}", response_model=WorkoutOut)
 def get_workout(workout_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
     w = _get(db, user, workout_id)
-    return _serialize(w, _day_activity(db, user, w.date, set()), dt.date.today())
+    return _serialize(w, _day_activity(db, user, w, set()), dt.date.today())
 
 
 @router.put("/workouts/{workout_id}", response_model=WorkoutOut)
@@ -178,7 +185,7 @@ def update_workout(
     w = _get(db, user, workout_id)
     _apply(w, body, user.profile.ftp)
     db.commit()
-    return _serialize(w, _day_activity(db, user, w.date, set()), dt.date.today())
+    return _serialize(w, _day_activity(db, user, w, set()), dt.date.today())
 
 
 @router.delete("/workouts/{workout_id}", status_code=204)

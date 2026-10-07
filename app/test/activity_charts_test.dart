@@ -7,6 +7,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:training_planner/core/data.dart';
+import 'package:training_planner/core/sport.dart';
+import 'package:training_planner/features/activity/activity_analysis.dart';
 import 'package:training_planner/features/activity/activity_map.dart';
 import 'package:training_planner/features/activity/activity_screen.dart';
 import 'package:training_planner/features/activity/highlight.dart';
@@ -33,10 +35,18 @@ final _laps = [
   {'index': 2, 'start_s': 300, 'duration_s': 270, 'distance_m': 2500.0, 'avg_watts': 320.0, 'avg_heartrate': 135.0},
 ];
 
-Widget _screen({bool gps = true, List<Json>? laps}) => ProviderScope(
+Widget _screen({bool gps = true, List<Json>? laps, String? sport, num? tss}) => ProviderScope(
   overrides: [
     activityProvider(1).overrideWith(
-      (ref) async => {'id': 1, 'name': 'Testfahrt', 'start_time': '2026-09-01T08:00:00', 'duration_s': 600, 'distance_m': 5000},
+      (ref) async => {
+        'id': 1,
+        'name': 'Testfahrt',
+        'start_time': '2026-09-01T08:00:00',
+        'duration_s': 600,
+        'distance_m': 5000,
+        'sport': ?sport,
+        'tss': ?tss,
+      },
     ),
     streamsProvider(1).overrideWith((ref) async => _streams(gps: gps)),
     powerCurveProvider(1).overrideWith((ref) async => _curve),
@@ -87,6 +97,27 @@ void main() {
     expect(find.text('Herzfrequenz'), findsOneWidget);
     expect(find.text('Trittfrequenz'), findsOneWidget);
     expect(find.text('Auswahl aufheben'), findsNothing);
+  });
+
+  testWidgets('Andere Sportarten: Sportart und hrTSS statt Radauswertung', (tester) async {
+    await _load(tester, _screen(sport: 'Run', tss: 55));
+    expect(find.byType(ActivityAnalysisSection), findsNothing);
+    expect(find.text('Laufen'), findsOneWidget);
+    expect(find.text('hrTSS'), findsOneWidget);
+    expect(find.text('TSS'), findsNothing);
+    await tester.pumpWidget(const SizedBox()); // neue ProviderScope statt Wiederverwendung
+    await _load(tester, _screen(sport: 'Ride', tss: 55));
+    expect(find.byType(ActivityAnalysisSection), findsOneWidget);
+    expect(find.text('Laufen'), findsNothing);
+  });
+
+  test('Sportarten: Namen, Symbole, Rad als Standard', () {
+    expect(isCyclingSport(null) && isCyclingSport('GravelRide') && isCyclingSport('VirtualRide'), isTrue);
+    expect(isCyclingSport('Run'), isFalse);
+    expect(sportInfo('Hike').label, 'Wandern');
+    expect(sportInfo('WeightTraining').label, 'Krafttraining');
+    expect(sportInfo('Run').icon, Icons.directions_run_rounded);
+    expect(sportInfo('Irgendwas').label, 'Irgendwas');
   });
 
   testWidgets('Dauer waehlen hebt den Abschnitt in den Graphen und auf der Karte hervor', (tester) async {

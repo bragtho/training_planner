@@ -70,7 +70,7 @@ def test_activity_fields_hr_fallback_and_none():
     assert none["tss"] is None
 
 
-def test_sync_imports_only_rides_and_is_idempotent():
+def test_sync_imports_all_sports_and_is_idempotent():
     pages = {1: [_ride(1), {"id": 2, "sport_type": "Run", "start_date": "2026-09-02T06:00:00Z",
                              "start_date_local": "2026-09-02T08:00:00Z"}]}
 
@@ -85,9 +85,9 @@ def test_sync_imports_only_rides_and_is_idempotent():
         r2 = strava.sync_activities(db, integ, p, full=True, http=_mock(handler))
         count = len(db.scalars(select(Activity)).all())
         cursor = integ.sync_cursor
-    assert r1 == {"imported": 1, "updated": 0, "new_ids": [1]}
-    assert r2 == {"imported": 0, "updated": 1, "new_ids": []}
-    assert count == 1
+    assert r1 == {"imported": 2, "updated": 0, "new_ids": [1, 2]}
+    assert r2 == {"imported": 0, "updated": 2, "new_ids": []}
+    assert count == 2
     assert cursor == int(datetime(2026, 9, 2, 6, tzinfo=timezone.utc).timestamp())
 
 
@@ -181,3 +181,42 @@ def test_http_api_flow():
     # fremde Aktivitaet ist nicht abrufbar
     tok2 = c.post("/auth/register", json={"email": "other@example.com", "password": "geheim123"}).json()["access_token"]
     assert c.get(f"/activities/{acts[0]['id']}", headers={"Authorization": f"Bearer {tok2}"}).status_code == 404
+
+
+def test_hr_tss_zones_like_trainingpeaks():
+    from app.metrics.power import hr_tss, hr_tss_series
+
+    assert abs(hr_tss(3600, 170, 170) - 100) < 1e-6  # 1 h an der Schwelle (Zone 5a) = 100
+    assert abs(hr_tss(3600, 150, 170) - 40) < 1e-6  # 88 % LTHR: Zone 2 (Rad)
+    assert abs(hr_tss(3600, 140, 170, "run") - 20) < 1e-6  # 82 % LTHR: Zone 1 (Laufen: unter 85 %)
+    assert abs(hr_tss(3600, 140, 170, "bike") - 40) < 1e-6  # gleiche HF auf dem Rad: Zone 2 (ab 81 %)
+    assert hr_tss(0, 150, 170) == 0 and hr_tss(3600, 0, 170) == 0
+    # Kurve: 30 min bei 100 % (50) + 30 min bei 70 % (Zone 1: 10) = 60
+    t = list(range(0, 3601, 1))
+    hr = [170] * 1800 + [119] * 1801
+    assert abs(hr_tss_series(t, hr, 170) - 60) < 0.1
+    # Luecken (hier 600 s ohne Daten) zaehlen hoechstens mit 10 s
+    assert hr_tss_series([0, 600], [170, 170], 170) < 3
+
+
+def test_other_sports_get_hr_tss_not_power_tss():
+    with SessionLocal() as db:
+        _, p = _user(db)
+        run = strava.activity_fields(_ride(1, sport_type="Run", device_watts=True, average_watts=300, average_heartrate=165), p)
+        hike = strava.activity_fields(_ride(2, sport_type="Hike", device_watts=False, average_heartrate=120, moving_time=7200), p)
+        gym = strava.activity_fields(_ride(3, sport_type="WeightTraining", device_watts=False), p)
+        p.lthr = None
+        est = strava.activity_fields(_ride(4, sport_type="Run", device_watts=False, average_heartrate=165), p)
+    assert run["norm_power"] is None and run["avg_power"] is None  # Laufleistung nicht mit der Rad-FTP verrechnen
+    assert abs(run["tss"] - 80) < 1e-6  # 165/170 = 97 %: Zone 4 (Laufen), 1 h
+    assert abs(hike["tss"] - 40) < 1e-6  # 120/170 = 71 %: Zone 1, 2 h
+    assert gym["tss"] is None  # ohne Puls kein hrTSS
+    assert est["tss"] is not None  # LTHR fehlt: Schaetzung aus der maximalen HF (90 % von 190 = 171)
+
+
+def test_sport_helpers():
+    from app.metrics.sports import is_cycling, is_run_like, is_strength
+
+    assert is_cycling("GravelRide") and is_cycling("VirtualRide") and not is_cycling("Run")
+    assert is_run_like("Hike") and not is_run_like("Ride")
+    assert is_strength("WeightTraining") and not is_strength("Yoga")

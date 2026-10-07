@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 
 import '../../core/api.dart';
 import '../../core/data.dart';
+import '../../core/sport.dart';
 import '../../core/theme.dart';
 import '../../core/ui.dart';
 
@@ -320,16 +321,17 @@ class _DayCell extends StatelessWidget {
           tss: (w['status'] == 'completed' ? w['actual_tss'] : w['planned_tss']) as num?,
           strike: w['status'] == 'skipped',
           check: w['status'] == 'completed',
-          strength: w['kind'] == 'strength',
+          icon: w['kind'] == 'strength' ? Icons.fitness_center_rounded : null,
           narrow: narrow,
         ),
       for (final a in loose[key] ?? const <Json>[])
         _Chip(
           color: _completedColor,
-          label: a['name'] as String? ?? 'Fahrt',
+          label: a['name'] as String? ?? sportInfo(a['sport'] as String?).label,
           tss: a['tss'] as num?,
           check: true,
           outline: true,
+          icon: isCyclingSport(a['sport'] as String?) ? null : sportInfo(a['sport'] as String?).icon,
           narrow: narrow,
         ),
     ];
@@ -409,12 +411,12 @@ class _Chip extends StatelessWidget {
     this.strike = false,
     this.check = false,
     this.outline = false,
-    this.strength = false,
+    this.icon,
     this.narrow = false,
   });
   final Color color;
   final String label;
-  final bool strength;
+  final IconData? icon;
   final num? tss;
   final bool strike;
   final bool check;
@@ -446,7 +448,7 @@ class _Chip extends StatelessWidget {
       child: Row(
         children: [
           if (check) ...[Icon(Icons.check_rounded, size: 12, color: color), const SizedBox(width: 2)],
-          if (strength) ...[Icon(Icons.fitness_center_rounded, size: 11, color: color), const SizedBox(width: 3)],
+          if (icon != null) ...[Icon(icon, size: 11, color: color), const SizedBox(width: 3)],
           Expanded(
             child: Text(
               label,
@@ -649,9 +651,9 @@ class _DaySheet extends StatelessWidget {
             for (final a in activities) ...[
               _SheetTile(
                 color: _completedColor,
-                icon: Icons.directions_bike_rounded,
-                title: a['name'] as String? ?? 'Fahrt',
-                status: 'Ungeplant',
+                icon: sportInfo(a['sport'] as String?).icon,
+                title: a['name'] as String? ?? sportInfo(a['sport'] as String?).label,
+                status: isCyclingSport(a['sport'] as String?) ? 'Ungeplant' : sportInfo(a['sport'] as String?).label,
                 details: [
                   formatDuration(a['duration_s'] as num),
                   if (a['tss'] != null) '${(a['tss'] as num).round()} TSS',

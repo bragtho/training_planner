@@ -320,6 +320,7 @@ class _DayCell extends StatelessWidget {
           tss: (w['status'] == 'completed' ? w['actual_tss'] : w['planned_tss']) as num?,
           strike: w['status'] == 'skipped',
           check: w['status'] == 'completed',
+          strength: w['kind'] == 'strength',
           narrow: narrow,
         ),
       for (final a in loose[key] ?? const <Json>[])
@@ -408,10 +409,12 @@ class _Chip extends StatelessWidget {
     this.strike = false,
     this.check = false,
     this.outline = false,
+    this.strength = false,
     this.narrow = false,
   });
   final Color color;
   final String label;
+  final bool strength;
   final num? tss;
   final bool strike;
   final bool check;
@@ -443,6 +446,7 @@ class _Chip extends StatelessWidget {
       child: Row(
         children: [
           if (check) ...[Icon(Icons.check_rounded, size: 12, color: color), const SizedBox(width: 2)],
+          if (strength) ...[Icon(Icons.fitness_center_rounded, size: 11, color: color), const SizedBox(width: 3)],
           Expanded(
             child: Text(
               label,
@@ -619,7 +623,11 @@ class _DaySheet extends StatelessWidget {
             for (final w in workouts) ...[
               _SheetTile(
                 color: _statusColor(context, w['status'] as String),
-                icon: w['status'] == 'completed' ? Icons.check_circle_rounded : Icons.event_note_rounded,
+                icon: w['status'] == 'completed'
+                    ? Icons.check_circle_rounded
+                    : w['kind'] == 'strength'
+                        ? Icons.fitness_center_rounded
+                        : Icons.event_note_rounded,
                 title: w['title'] as String,
                 status: _labels[w['status']] ?? '',
                 details: [

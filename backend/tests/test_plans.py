@@ -116,3 +116,83 @@ def test_update_copy_delete_preview_and_isolation():
 
     assert c.delete(f"/workouts/{w['id']}", headers=h).status_code == 204
     assert c.get(f"/workouts/{w['id']}", headers=h).status_code == 404
+
+
+def ex(name, sets, reps=None, hold=None, rest=60, **kw):
+    d = {"type": "exercise", "name": name, "sets": sets, "rest_s": rest, **kw}
+    if reps is not None:
+        d["reps"] = reps
+    if hold is not None:
+        d["duration_s"] = hold
+    return d
+
+
+def test_strength_duration_has_no_tss_and_rejects_bad_input():
+    st = steps([ex("Kniebeuge", 3, reps=10, rest=90), ex("Plank", 3, hold=45, rest=30)])
+    # Kniebeuge: 3*30 + 2*90 + 45 = 315 s, Plank: 3*45 + 2*30 + 45 = 240 s
+    assert total_duration(st) == 555
+    s = summarize(st, 250)
+    assert s["kind"] == "strength" and s["duration_s"] == 555 and s["tss"] is None
+    for bad in (
+        [ex("Kniebeuge", 3)],  # weder reps noch Haltezeit
+        [ex("Kniebeuge", 3, reps=10, hold=30)],  # beides
+        [ex("Kniebeuge", 0, reps=10)],
+        [ex("Kniebeuge", 3, reps=10), leaf("steady", 10, 60)],  # keine Mischung mit Radschritten
+    ):
+        with pytest.raises(ValidationError):
+            steps(bad)
+
+
+def test_strength_workout_api_and_manual_completion():
+    c, h = _client()
+    day = (dt.date.today() + dt.timedelta(days=2)).isoformat()
+    body = {"date": day, "title": "Kraft Beine", "structure": [ex("Kniebeuge", 3, reps=8, rest=120, load="RPE 7")]}
+    w = c.post("/workouts", json=body, headers=h).json()
+    assert w["kind"] == "strength" and w["planned_tss"] is None and w["planned_duration_s"] == 3 * 24 + 2 * 120 + 45
+    assert c.get(f"/workouts/{w['id']}", headers=h).json()["structure"][0]["name"] == "Kniebeuge"
+    done = c.put(f"/workouts/{w['id']}", json={**body, "status": "completed"}, headers=h).json()
+    assert done["status"] == "completed"  # von Hand erledigt, keine Strava-Aktivitaet noetig
+    bike = c.post("/workouts", json={"date": day, "title": "SS", "structure": [leaf("steady", 60, 100)]}, headers=h).json()
+    assert bike["kind"] == "bike" and bike["planned_tss"] > 0
+
+
+def test_exercise_catalog_id_fills_name_and_unknown_id_is_rejected():
+    st = steps([{"type": "exercise", "exercise_id": "squat", "sets": 3, "reps": 8}])
+    assert st[0].name == "Kniebeuge" and st[0].exercise_id == "squat"
+    with pytest.raises(ValidationError):
+        steps([{"type": "exercise", "exercise_id": "gibt_es_nicht", "sets": 3, "reps": 8}])
+    c, h = _client()
+    ex = c.get("/exercises", headers=h).json()["exercises"]
+    ids = {e["id"] for e in ex}
+    assert {"squat", "plank", "hip_thrust"} <= ids
+    assert all(e["steps"] and e["muscles"] and e["name"] for e in ex)
+    assert next(e for e in ex if e["id"] == "plank")["hold"] is True
+
+
+def test_free_named_exercises_are_matched_to_catalog():
+    from app.exercises import match_id
+
+    assert match_id("Hip Bridge") == "glute_bridge"
+    assert match_id("Rumänisches Kreuzheben") == "rdl"
+    assert match_id("Goblet-Kniebeuge") == "goblet_squat"
+    assert match_id("Einbeiniges Kreuzheben") == "single_leg_rdl"
+    assert match_id("Kreuzheben") == "deadlift" and match_id("Kniebeuge") == "squat"
+    assert match_id("Seitstütz (Side Plank)") == "side_plank" and match_id("Plank") == "plank"
+    assert match_id("Mobilisation Hüfte und Brustwirbelsäule") is None
+    assert match_id("Rudern am Band") is None  # Anleitung im Katalog gilt fuer Kurzhantel-Rudern
+
+    c, h = _client()
+    day = (dt.date.today() + dt.timedelta(days=2)).isoformat()
+    body = {"date": day, "title": "Kraft", "structure": [ex("Hip Bridge", 2, reps=12), ex("Mobilisation", 1, hold=300)]}
+    w = c.post("/workouts", json=body, headers=h).json()
+    assert [s.get("exercise_id") for s in w["structure"]] == ["glute_bridge", None]
+    # Aeltere gespeicherte Trainings ohne Kennung werden beim Lesen zugeordnet
+    from app.db import SessionLocal
+    from app.models import PlannedWorkout
+
+    with SessionLocal() as db:
+        row = db.get(PlannedWorkout, w["id"])
+        row.structure = [{k: v for k, v in s.items() if k != "exercise_id"} for s in row.structure]
+        db.commit()
+    again = c.get(f"/workouts/{w['id']}", headers=h).json()
+    assert again["structure"][0]["exercise_id"] == "glute_bridge"

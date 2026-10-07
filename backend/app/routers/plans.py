@@ -7,7 +7,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..db import get_db
-from ..metrics.workout import Steps, summarize
+from ..exercises import catalog, match_id
+from ..metrics.workout import Steps, is_strength, summarize
 from ..models import Activity, PlannedWorkout, User
 from ..routers.activities import ActivityOut, _out as activity_out
 from ..security import current_user
@@ -25,7 +26,8 @@ class WorkoutIn(BaseModel):
     # Nur ohne Struktur (z. B. "Ruhetag" oder freies Training); mit Struktur wird beides berechnet
     planned_duration_s: int | None = Field(None, ge=0, le=86400)
     planned_tss: float | None = Field(None, ge=0, le=1000)
-    status: Literal["planned", "skipped"] = "planned"
+    # "completed" setzt der Athlet von Hand (Krafttraining wird nicht von Strava importiert)
+    status: Literal["planned", "skipped", "completed"] = "planned"
 
 
 class WorkoutOut(BaseModel):
@@ -39,6 +41,7 @@ class WorkoutOut(BaseModel):
     # planned | completed | missed | skipped (completed/missed werden aus den Aktivitaeten abgeleitet)
     status: str
     created_by: str
+    kind: str = "bike"  # bike | strength
     activity_id: int | None = None
     actual_tss: float | None = None
 
@@ -66,16 +69,23 @@ def _apply(w: PlannedWorkout, body: WorkoutIn, ftp: float) -> None:
 def _serialize(w: PlannedWorkout, act: Activity | None, today: dt.date) -> WorkoutOut:
     if w.status == "skipped":
         status = "skipped"
-    elif act is not None:
+    elif act is not None or w.status == "completed":
         status = "completed"
     elif w.date < today:
         status = "missed"
     else:
         status = "planned"
+    structure = w.structure
+    if is_strength(structure):  # aeltere Trainings ohne Kennung: Katalog-Uebung ueber den Namen zuordnen
+        structure = [
+            {**s, "exercise_id": s.get("exercise_id") or match_id(s.get("name"))} if (s.get("exercise_id") or match_id(s.get("name"))) else s
+            for s in structure
+        ]
     return WorkoutOut(
-        id=w.id, date=w.date, title=w.title, description=w.description, structure=w.structure,
+        id=w.id, date=w.date, title=w.title, description=w.description, structure=structure,
         planned_duration_s=w.planned_duration_s, planned_tss=w.planned_tss, status=status,
-        created_by=w.created_by, activity_id=act.id if act else None, actual_tss=act.tss if act else None,
+        created_by=w.created_by, kind="strength" if is_strength(w.structure) else "bike",
+        activity_id=act.id if act else None, actual_tss=act.tss if act else None,
     )
 
 
@@ -133,6 +143,12 @@ def calendar(start: dt.date, end: dt.date, user: User = Depends(current_user), d
         raise HTTPException(422, f"Zeitraum ungueltig (max. {MAX_RANGE_DAYS} Tage)")
     workouts, acts = calendar_data(db, user, start, end)
     return {"workouts": workouts, "activities": [activity_out(a) for a in acts]}
+
+
+@router.get("/exercises")
+def exercises(user: User = Depends(current_user)):
+    """Katalog der Kraftuebungen mit Kurzanleitung (die Bilder zeichnet die App anhand der id)."""
+    return {"exercises": catalog()}
 
 
 @router.post("/workouts/preview")

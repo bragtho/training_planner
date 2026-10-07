@@ -445,3 +445,76 @@ def test_feedback_prompt_carries_memory_chat_and_coach_view():
         assert "Offseason bis 01.11.2026" in prompt and "Ich pausiere bewusst bis November." in prompt
         assert "Die Offseason ist gewollt." in prompt and "hat Vorrang" in prompt
         assert "nie mehr Umfang" in fake.calls[1]["system"]
+
+
+def test_feedback_for_old_ride_only_knows_what_was_known_then():
+    """Absprachen und Gespraech von spaeter duerfen nicht rueckwirkend in das Feedback zu einer aelteren Fahrt einfliessen."""
+    from app.models import CoachMemory, CoachMessage
+
+    ride_day = TODAY - dt.timedelta(days=30)
+    with SessionLocal() as db:
+        u = make_user(db, ftp=FTP)
+        now = dt.datetime.now()
+        db.add(CoachMemory(user_id=u.id, text="Startet nach der Offseason mit zwei Wochen Grundlage.", created_at=now))
+        db.add(CoachMemory(user_id=u.id, text="Kniebeuge nur mit Kurzhanteln.", created_at=now - dt.timedelta(days=60)))
+        db.add(CoachMemory(user_id=u.id, text="Offseason seit Anfang des Monats.", valid_from=ride_day - dt.timedelta(days=5), created_at=now))
+        db.add(CoachMessage(user_id=u.id, role="user", content={"text": "Offseason bis zum 2. November."}, created_at=now))
+        db.add(CoachMessage(user_id=u.id, role="user", content={"text": "Heute war ich auf dem Berg."},
+                            created_at=now - dt.timedelta(days=31)))
+        old = add_activity(db, u, ride_day, series((1800, 150)), ext="old")
+        late = add_activity(db, u, TODAY - dt.timedelta(days=2), series((1800, 150)), ext="late", name="Spaetere Fahrt")
+        I.insight_row(db, late).feedback = {**FEEDBACK, "headline": "Lockere Offseason-Runde"}
+        db.commit()
+        fake = FakeClient(msg(text(json.dumps(FEEDBACK))))
+        I.generate_feedback(db, u, old, client=fake)
+        prompt = fake.calls[0]["messages"][0]["content"]
+        assert "Startet nach der Offseason" not in prompt  # erst spaeter gemerkt
+        assert "Offseason bis zum 2. November." not in prompt  # erst spaeter besprochen
+        assert "Lockere Offseason-Runde" not in prompt  # Feedback zu einer spaeteren Fahrt
+        assert "Kniebeuge nur mit Kurzhanteln." in prompt  # damals schon bekannt
+        assert "Heute war ich auf dem Berg." in prompt
+        assert "Offseason seit Anfang des Monats." in prompt and f"gilt ab {(ride_day - dt.timedelta(days=5)).isoformat()}" in prompt
+        assert "Stichtag" in fake.calls[0]["system"] and "Saisonphase" in fake.calls[0]["system"]
+        # Fuer eine heutige Fahrt gilt alles
+        today_ride = add_activity(db, u, TODAY, series((1800, 150)), ext="today")
+        fake2 = FakeClient(msg(text(json.dumps({"verdict": "ok", "text": "x"}))), msg(text(json.dumps(FEEDBACK))))
+        I.generate_feedback(db, u, today_ride, client=fake2)
+        p2 = fake2.calls[-1]["messages"][0]["content"]
+        assert "Startet nach der Offseason" in p2 and "Offseason bis zum 2. November." in p2
+
+
+def test_memory_valid_from_and_start_rules():
+    from app.models import CoachMemory
+
+    with SessionLocal() as db:
+        u = make_user(db, ftp=FTP)
+        now = dt.datetime.now()
+        a = CoachMemory(user_id=u.id, text="Ohne Start", created_at=now)
+        b = CoachMemory(user_id=u.id, text="Mit Start", valid_from=TODAY - dt.timedelta(days=10), created_at=now)
+        c = CoachMemory(user_id=u.id, text="Startet spaeter", valid_from=TODAY + dt.timedelta(days=3), created_at=now)
+        db.add_all([a, b, c])
+        db.commit()
+        names = lambda day: {m.text for m in T.active_memories(db, u.id, day)}
+        assert names(TODAY) == {"Ohne Start", "Mit Start"}  # Start in der Zukunft gilt noch nicht
+        assert names(TODAY - dt.timedelta(days=11)) == set()
+        assert names(TODAY - dt.timedelta(days=5)) == {"Mit Start"}  # Startdatum gilt auch, wenn spaeter gemerkt
+        assert names(TODAY + dt.timedelta(days=3)) == {"Ohne Start", "Mit Start", "Startet spaeter"}
+        r = T.save_memory(db, u, {"text": "Offseason", "valid_from": TODAY.isoformat(), "valid_until": (TODAY + dt.timedelta(days=5)).isoformat()})
+        assert f"gilt ab {TODAY.isoformat()}, gilt bis" in r["saved"]
+        with pytest.raises(T.ToolError, match="valid_from liegt nach valid_until"):
+            T.save_memory(db, u, {"text": "Falsch", "valid_from": (TODAY + dt.timedelta(days=9)).isoformat(),
+                                  "valid_until": (TODAY + dt.timedelta(days=5)).isoformat()})
+        with pytest.raises(T.ToolError, match="kein Datum"):
+            T.save_memory(db, u, {"text": "Falsch", "valid_from": "bald"})
+
+
+def test_ensure_columns_adds_missing_column_to_existing_table():
+    from sqlalchemy import inspect, text as sql
+    from app.db import ensure_columns
+
+    with engine.begin() as conn:
+        conn.execute(sql("ALTER TABLE coach_memories DROP COLUMN valid_from"))
+    assert "valid_from" not in {c["name"] for c in inspect(engine).get_columns("coach_memories")}
+    assert ensure_columns() == ["coach_memories.valid_from"]
+    assert "valid_from" in {c["name"] for c in inspect(engine).get_columns("coach_memories")}
+    assert ensure_columns() == []  # nichts mehr zu tun

@@ -405,6 +405,9 @@ Gilt eine bewusste Pause, Offseason, ein Uebergang, Tapering, Krankheit oder Ver
 hohe Form gewollt: load_fit ist dann fits, und Du empfiehlst nie mehr Umfang oder mehr Training, als vereinbart ist \
 (z. B. nichts vor dem vereinbarten Trainingsstart). Bei Offseason eher: locker weiterfahren, Erholung geniessen, Termin des Starts nennen. \
 Widersprich nie dem Gedaechtnis oder dem Gespraech.
+- Stichtag: Der Kontext gibt den Stand am Tag der Fahrt wieder, nicht den von heute. Nenne eine Saisonphase (Offseason, Grundlage, Aufbau, \
+Pause, Tapering) nur, wenn sie im Kontext fuer diesen Tag steht (Saisonplan, Gedaechtnis mit Datum oder Gespraech). Sonst nimm keine an \
+und ordne die Fahrt nur nach den Zahlen ein (Last, Form, Art der Fahrt). Schliesse nie aus spaeteren Absprachen auf frueher.
 - Ausdauer: Entkopplung (Pw:HR) unter 5 % spricht bei langen gleichmaessigen Fahrten fuer gute Grundlage, ueber 8-10 % fuer Ermuedung, \
 Hitze, zu wenig Essen oder zu hohes Tempo (Praxisregel). Nur erwaehnen, wenn vorhanden und relevant.
 - FTP: Deuten Fahrt oder FTP-Pruefung auf eine zu niedrige FTP (z. B. 20 min ueber 105 % FTP, NP einer langen Fahrt ueber FTP), \
@@ -443,7 +446,7 @@ def generate_feedback(db: Session, user: User, act: Activity, *, client: Any = N
     ftp = ftp_report(db, user)  # Stand heute: der Hinweis soll zur aktuellen Empfehlung in der App passen
     from .coach.form_hint import _chat_lines  # spaet importiert wie oben
 
-    chat, _ = _chat_lines(db, user)
+    chat, _ = _chat_lines(db, user, until=day if day < dt.date.today() else None)  # aeltere Fahrt: nur das Gespraech bis dahin
     # Einordnung des Coaches (Gedaechtnis und Gespraech eingerechnet) fuer Fahrten der letzten Tage; bei aelteren Fahrten
     # waere der heutige Stand irrefuehrend, dort gilt die reine Rechnung zusammen mit dem Gedaechtnis im Kontext
     view = coach_load_view(db, user, load, client=client) if (dt.date.today() - day).days <= AUTO_FEEDBACK_DAYS + 2 else None

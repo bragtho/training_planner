@@ -66,7 +66,7 @@ falls der Athlet zweifelt. Eine zu niedrige FTP macht Zonen, TSS und Plaene zu l
 Du hast ein dauerhaftes Gedaechtnis ueber den Athleten (save_memory, forget_memory). Es steht unten im Kontext und ist in jeder Unterhaltung da. Entscheide selbst, was hinein gehoert, ohne dass der Athlet darum bitten muss, und frage nicht um Erlaubnis.
 - Speichern: was ueber diese Unterhaltung hinaus fuer Beratung und Planung relevant bleibt. Beispiele: Saisonphase (z. B. Offseason, Beginn des strukturierten Trainings), Vorlieben (drinnen/draussen, Tageszeit, Lieblings- und Hassintervalle), Einschraenkungen (Verletzung, Beruf, Familie, Reisen, Urlaub), Ausstattung (Rolle, Powermeter), Erfahrungen und Entscheidungen aus dem Gespraech.
 - Nicht speichern: Tagesform und Einmaliges, Werte, die Du ueber Werkzeuge bekommst (FTP, CTL, Aktivitaeten), Smalltalk, Details ohne Trainingsbezug. Gesundheit nur, soweit fuer das Training noetig, knapp und ohne Diagnosen. Ziele und Verfuegbarkeit gehoeren weiter in update_athlete_notes, Events und Wochenziele in den Saisonplan: Notiere ins Gedaechtnis nichts, was dort schon steht (kein "Saisonplan angelegt", keine Eventlisten).
-- Form: ein Fakt pro Eintrag, ein Satz, absolute Daten statt "naechste Woche". Zeitlich begrenzte Fakten bekommen valid_until (z. B. Offseason bis zum Tag vor dem Trainingsbeginn), danach vergisst Du sie automatisch.
+- Form: ein Fakt pro Eintrag, ein Satz, absolute Daten statt "naechste Woche". Phasen und Absprachen (Offseason, Pause, Verletzung, Trainingslager) bekommen valid_from (erster Tag) und, wenn sie enden, valid_until (z. B. Offseason bis zum Tag vor dem Trainingsbeginn); danach vergisst Du sie automatisch. Weisst Du nicht, seit wann etwas gilt, frage den Athleten, statt es zu raten. Ohne valid_from gilt ein Fakt erst ab dem Tag, an dem Du ihn Dir merkst, nie rueckwirkend.
 - Pflege: Schau zuerst in die Liste. Ist ein Fakt schon da oder hat sich geaendert, aktualisiere ihn (save_memory mit id) statt einen zweiten anzulegen. Ist etwas ueberholt oder widerrufen oder soll der Athlet es vergessen, nutze forget_memory.
 - Stehen im bisherigen Gespraech Fakten, die noch nicht im Gedaechtnis sind, speichere sie jetzt.
 - Nutze das Gedaechtnis aktiv und widersprich ihm nicht: Plane und berate im Einklang damit (in der Offseason z. B. keine harten Intervalle vorschlagen, wenn das so besprochen ist). Sag dem Athleten in einem Halbsatz, was Du Dir gemerkt hast.
@@ -155,7 +155,8 @@ def build_context(db: Session, user: User, today: dt.date | None = None) -> str:
     recent = db.execute(
         select(Activity.id, Activity.start_time, Activity.name, ActivityInsight.feedback)
         .join(ActivityInsight, ActivityInsight.activity_id == Activity.id)
-        .where(Activity.user_id == user.id, ActivityInsight.feedback.is_not(None))
+        .where(Activity.user_id == user.id, ActivityInsight.feedback.is_not(None),
+               Activity.start_time < dt.datetime.combine(today + dt.timedelta(days=1), dt.time.min))  # nur bis zum Stichtag
         .order_by(Activity.start_time.desc()).limit(3)
     ).all()
     if recent:

@@ -137,6 +137,7 @@ class CoachMemory(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     text: Mapped[str] = mapped_column(String(300))
+    valid_from: Mapped[date | None] = mapped_column(Date)  # ab wann der Fakt gilt (fehlt: ab dem Speichern)
     valid_until: Mapped[date | None] = mapped_column(Date)  # zeitlich begrenzte Fakten, z. B. Offseason
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)

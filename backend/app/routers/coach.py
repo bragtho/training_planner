@@ -42,8 +42,8 @@ QUICK_PROMPTS = {
         "und sag mir, was Du geaendert hast."
     ),
     "check_ftp": (
-        "Pruefe, ob meine FTP noch stimmt (get_ftp_assessment). Erklaere das Ergebnis kurz. Ist sie zu niedrig, nenne mir den neuen Wert; "
-        "ist sie nicht bestaetigt, schlag mir einen passenden FTP-Test vor."
+        "Pruefe, ob meine FTP noch stimmt (get_ftp_assessment). Erklaere das Ergebnis kurz, auch ob und wann sie zuletzt automatisch angepasst wurde. "
+        "Ist sie nicht bestaetigt oder soll sie erst nach einer Pause geprueft werden, schlag mir einen passenden FTP-Test vor."
     ),
 }
 

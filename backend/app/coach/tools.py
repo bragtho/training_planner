@@ -266,7 +266,7 @@ TOOLS: list[dict] = [
     {
         "name": "get_ftp_assessment",
         "description": "Prueft, ob die eingestellte FTP zu den Leistungen der letzten 90 Tage passt (Bestwerte 20/30/60 min, NP langer Fahrten, "
-                       "Critical Power). Empfehlung raise (mit suggested_ftp), ok oder test. Laedt dafuer Sensordaten harter Fahrten nach.",
+                       "Critical Power). Empfehlung raise (mit suggested_ftp), hold, ok oder test; last_change nennt die letzte FTP-Aenderung. Laedt dafuer Sensordaten harter Fahrten nach. Aendert die FTP nicht (das macht das System nach festen Regeln).",
         "input_schema": {"type": "object", "properties": {}},
     }
 ]

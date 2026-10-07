@@ -237,6 +237,7 @@ FEEDBACK = {"headline": "Intervalle sauber getroffen", "summary": "Alle fuenf In
 
 
 def test_feedback_is_generated_once_cached_and_limited(monkeypatch):
+    monkeypatch.setattr(I, "coach_load_view", lambda *a, **k: None)  # Einordnung separat getestet
     with SessionLocal() as db:
         u = make_user(db, ftp=FTP)
         a = add_activity(db, u, TODAY, interval_ride(work_w=FTP * 1.15), tss=82)
@@ -267,6 +268,7 @@ def test_feedback_is_generated_once_cached_and_limited(monkeypatch):
 
 
 def test_feedback_endpoint_and_auto_feedback(monkeypatch):
+    monkeypatch.setattr(I, "coach_load_view", lambda *a, **k: None)
     c = TestClient(app)
     h = auth(c)
     with SessionLocal() as db:
@@ -423,3 +425,23 @@ def test_coach_context_lists_recent_feedback():
         db.commit()
         ctx = build_context(db, u)
         assert f"Lockere Runde (id {a.id}): Locker und richtig dosiert" in ctx
+
+
+def test_feedback_prompt_carries_memory_chat_and_coach_view():
+    from app.models import CoachMemory, CoachMessage
+
+    with SessionLocal() as db:
+        u = make_user(db, ftp=FTP)
+        db.add(CoachMemory(user_id=u.id, text="Offseason bis 01.11.2026, danach strukturiertes Training.",
+                           valid_until=TODAY + dt.timedelta(days=20)))
+        db.add(CoachMessage(user_id=u.id, role="user", content={"text": "Ich pausiere bewusst bis November."}))
+        for d in range(30):
+            add_activity(db, u, TODAY - dt.timedelta(days=d + 1), series((3600, 180)), tss=60, np_=180, ext=f"h{d}")
+        a = add_activity(db, u, TODAY, series((1800, 150)), ext="today")
+        fake = FakeClient(msg(text(json.dumps({"verdict": "ok", "text": "Die Offseason ist gewollt."}))), msg(text(json.dumps(FEEDBACK))))
+        I.generate_feedback(db, u, a, client=fake)
+        assert len(fake.calls) == 2  # Einordnung, dann Feedback
+        prompt = fake.calls[1]["messages"][0]["content"]
+        assert "Offseason bis 01.11.2026" in prompt and "Ich pausiere bewusst bis November." in prompt
+        assert "Die Offseason ist gewollt." in prompt and "hat Vorrang" in prompt
+        assert "nie mehr Umfang" in fake.calls[1]["system"]

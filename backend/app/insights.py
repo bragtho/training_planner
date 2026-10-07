@@ -392,6 +392,12 @@ Zu hart gefahrene Grundlage oder Erholung ist ein Fehler, zu niedrige Intervalle
 und wie viele Tage locker danach sinnvoll sind.
 - Belastung: Passt die Fahrt zum aktuellen Zustand (TSB, Ermuedung, Belastungsbewertung, Phase, Gedaechtnis z. B. Offseason)? \
 Sag deutlich, wenn es zu viel oder zu wenig war.
+- Vorrang hat, was Du ueber den Athleten weisst: Gedaechtnis, bisheriges Gespraech, Ziele, Saisonplan und die Einordnung des Coaches \
+(sie beruecksichtigt das alles schon). Die automatische Belastungsbewertung ist nur eine Rechnung aus Zahlen und kennt keine Absprachen. \
+Gilt eine bewusste Pause, Offseason, ein Uebergang, Tapering, Krankheit oder Verletzung, dann sind niedrige Last, sinkende Fitness und \
+hohe Form gewollt: load_fit ist dann fits, und Du empfiehlst nie mehr Umfang oder mehr Training, als vereinbart ist \
+(z. B. nichts vor dem vereinbarten Trainingsstart). Bei Offseason eher: locker weiterfahren, Erholung geniessen, Termin des Starts nennen. \
+Widersprich nie dem Gedaechtnis oder dem Gespraech.
 - Ausdauer: Entkopplung (Pw:HR) unter 5 % spricht bei langen gleichmaessigen Fahrten fuer gute Grundlage, ueber 8-10 % fuer Ermuedung, \
 Hitze, zu wenig Essen oder zu hohes Tempo (Praxisregel). Nur erwaehnen, wenn vorhanden und relevant.
 - FTP: Deuten Fahrt oder FTP-Pruefung auf eine zu niedrige FTP (z. B. 20 min ueber 105 % FTP, NP einer langen Fahrt ueber FTP), \
@@ -426,10 +432,19 @@ def generate_feedback(db: Session, user: User, act: Activity, *, client: Any = N
     day = act.start_time.date()
     load = load_report(db, user, day)
     ftp = ftp_report(db, user)  # Stand heute: der Hinweis soll zur aktuellen Empfehlung in der App passen
+    from .coach.form_hint import _chat_lines  # spaet importiert wie oben
+
+    chat, _ = _chat_lines(db, user)
+    # Einordnung des Coaches (Gedaechtnis und Gespraech eingerechnet) fuer Fahrten der letzten Tage; bei aelteren Fahrten
+    # waere der heutige Stand irrefuehrend, dort gilt die reine Rechnung zusammen mit dem Gedaechtnis im Kontext
+    view = coach_load_view(db, user, load, client=client) if (dt.date.today() - day).days <= AUTO_FEEDBACK_DAYS + 2 else None
     prompt = "\n".join([
         build_context(db, user, day), "",
+        "Letzter Teil des Gespraechs (aelteste zuerst):", *(chat or ["(noch kein Gespraech)"]), "",
         "Analyse der Fahrt (JSON):", json.dumps(report, ensure_ascii=False), "",
-        "Belastungsbewertung am Tag der Fahrt (JSON):", json.dumps({k: load[k] for k in ("verdict", "flags", "metrics", "context")}, ensure_ascii=False), "",
+        "Automatische Belastungsbewertung, nur Zahlen ohne Kenntnis von Absprachen (JSON):",
+        json.dumps({k: load[k] for k in ("verdict", "flags", "metrics", "context")}, ensure_ascii=False), "",
+        *(["Einordnung des Coaches mit Gedaechtnis und Gespraech (hat Vorrang):", json.dumps(view, ensure_ascii=False), ""] if view else []),
         "FTP-Pruefung (JSON):", json.dumps({k: ftp.get(k) for k in ("ftp", "recommendation", "suggested_ftp", "confidence", "reason")}, ensure_ascii=False), "",
         "Schreibe jetzt das Feedback zu dieser Fahrt.",
     ])

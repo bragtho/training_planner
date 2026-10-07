@@ -12,6 +12,11 @@ import '../../core/data.dart';
 import '../../core/theme.dart';
 import '../../core/ui.dart';
 import 'activity_analysis.dart';
+import 'activity_map.dart';
+import 'combined_chart.dart';
+import 'highlight.dart';
+import 'power_curve_card.dart';
+import 'zoom.dart';
 
 class ActivityScreen extends ConsumerWidget {
   const ActivityScreen({super.key, required this.id});
@@ -61,7 +66,7 @@ class ActivityScreen extends ConsumerWidget {
               ]),
             ),
             error: (e, _) => StatusMessage.error(errorMessage(e), onRetry: () => ref.invalidate(streamsProvider(id))),
-            data: (s) => _Details(streams: s, ftp: ftp),
+            data: (s) => _Details(id: id, streams: s, ftp: ftp),
           ),
         ],
       ),
@@ -136,10 +141,37 @@ class _Header extends StatelessWidget {
 
 const _zoneNames = ['Erholung', 'Ausdauer', 'Tempo', 'Schwelle', 'VO2max', 'Anaerob', 'Neuromuskulär'];
 
-class _Details extends StatelessWidget {
-  const _Details({required this.streams, required this.ftp});
+class _Details extends StatefulWidget {
+  const _Details({required this.id, required this.streams, required this.ftp});
+  final int id;
   final Json streams;
   final num? ftp;
+
+  @override
+  State<_Details> createState() => _DetailsState();
+}
+
+class _DetailsState extends State<_Details> {
+  Highlight? _selected;
+  ViewRange? _view; // null = ganze Fahrt
+  bool _combined = false; // alle Daten in einem Diagramm
+
+  double get _total => totalMinutes(streams);
+
+  ViewRange? _sectionFor(Highlight h) => sectionView(h.startMin, h.endMin, _total);
+
+  bool get _sectionZoomed => _selected != null && _view != null && _view == _sectionFor(_selected!);
+
+  void _select(Highlight? h) => setState(() {
+        final follow = _sectionZoomed; // Zoom auf den Abschnitt folgt der neuen Auswahl
+        _selected = h;
+        if (follow) _view = h == null ? null : _sectionFor(h);
+      });
+
+  void _gesture(double factor, double anchor, double pan) =>
+      setState(() => _view = applyGesture(_view, _total, factor: factor, anchor: anchor, pan: pan));
+
+  Json get streams => widget.streams;
 
   List<FlSpot> _spots(String key) {
     final t = (streams['time'] as List?) ?? const [];
@@ -154,26 +186,82 @@ class _Details extends StatelessWidget {
   Widget build(BuildContext context) {
     final charts = <(String, String, String, Color, IconData)>[
       ('watts', 'Leistung', 'W', AppColors.power, Icons.bolt_rounded),
-      ('heartrate', 'Puls', 'bpm', AppColors.heart, Icons.favorite_rounded),
+      ('heartrate', 'Herzfrequenz', 'bpm', AppColors.heart, Icons.favorite_rounded),
+      ('cadence', 'Trittfrequenz', 'rpm', AppColors.cadence, Icons.autorenew_rounded),
       ('altitude', 'Höhenprofil', 'm', AppColors.altitude, Icons.terrain_rounded),
     ].where((c) => _spots(c.$1).isNotEmpty).toList();
-    if (charts.isEmpty) {
+    final hasMap = ActivityMapCard.route(streams).length >= 2;
+    if (charts.isEmpty && !hasMap) {
       return const StatusMessage(
         icon: Icons.sensors_off_rounded,
         title: 'Keine Sensordaten',
-        message: 'Für diese Aktivität wurden keine Leistungs-, Puls- oder Höhendaten aufgezeichnet.',
+        message: 'Für diese Aktivität wurden keine Leistungs-, Puls-, Trittfrequenz- oder Höhendaten aufgezeichnet.',
       );
     }
     final hasPower = charts.any((c) => c.$1 == 'watts');
+    final ftp = widget.ftp;
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      if (hasPower && ftp != null && ftp! > 0) ...[
-        _ZoneDistribution(streams: streams, ftp: ftp!),
+      if (hasPower) ...[
+        PowerCurveCard(
+          id: widget.id,
+          selected: _selected,
+          zoomed: _sectionZoomed,
+          onSelect: _select,
+          onZoom: (z) => setState(() => _view = z && _selected != null ? _sectionFor(_selected!) : null),
+        ),
         const SizedBox(height: Gap.md),
       ],
+      if (hasMap) ...[
+        ActivityMapCard(streams: streams, highlight: _selected, zoomed: _sectionZoomed),
+        const SizedBox(height: Gap.md),
+      ],
+      if (charts.isNotEmpty && _total > 0) ...[
+        ZoomBar(total: _total, view: _view, onChanged: (v) => setState(() => _view = v)),
+        const SizedBox(height: Gap.md),
+      ],
+      if (charts.length >= 2) ...[
+        Align(
+          alignment: Alignment.centerLeft,
+          child: SegmentedButton<bool>(
+            showSelectedIcon: false,
+            segments: const [
+              ButtonSegment(value: false, icon: Icon(Icons.view_agenda_outlined, size: 18), label: Text('Einzeln')),
+              ButtonSegment(value: true, icon: Icon(Icons.stacked_line_chart_rounded, size: 18), label: Text('Kombiniert')),
+            ],
+            selected: {_combined},
+            onSelectionChanged: (v) => setState(() => _combined = v.first),
+          ),
+        ),
+        const SizedBox(height: Gap.md),
+      ],
+      if (_combined && charts.length >= 2) ...[
+        CombinedChart(
+          series: [
+            for (final c in charts)
+              ChartSeries(key: c.$1, title: c.$2, unit: c.$3, color: c.$4, icon: c.$5, spots: _spots(c.$1)),
+          ],
+          highlight: _selected,
+          view: _view,
+          onGesture: _gesture,
+        ),
+        const SizedBox(height: Gap.md),
+      ] else
       for (final c in charts) ...[
-        _StreamChart(spots: _spots(c.$1), title: c.$2, unit: c.$3, color: c.$4, icon: c.$5, ftp: c.$1 == 'watts' ? ftp : null),
+        _StreamChart(
+          spots: _spots(c.$1),
+          title: c.$2,
+          unit: c.$3,
+          color: c.$4,
+          icon: c.$5,
+          ftp: c.$1 == 'watts' ? ftp : null,
+          highlight: _selected,
+          view: _view,
+          onGesture: _gesture,
+          ignoreZero: c.$1 == 'cadence',
+        ),
         const SizedBox(height: Gap.md),
       ],
+      if (hasPower && ftp != null && ftp > 0) _ZoneDistribution(streams: streams, ftp: ftp),
     ]);
   }
 }
@@ -272,6 +360,10 @@ class _StreamChart extends StatelessWidget {
     required this.color,
     required this.icon,
     this.ftp,
+    this.highlight,
+    this.view,
+    this.onGesture,
+    this.ignoreZero = false,
   });
   final List<FlSpot> spots;
   final String title;
@@ -279,16 +371,40 @@ class _StreamChart extends StatelessWidget {
   final Color color;
   final IconData icon;
   final num? ftp;
+  final Highlight? highlight;
+  final ViewRange? view; // sichtbarer Ausschnitt, null = ganze Fahrt
+  final void Function(double factor, double anchor, double pan)? onGesture;
+  final bool ignoreZero; // Trittfrequenz: Rollen (0) zaehlt nicht in den Schnitt
+
+  static double _mean(Iterable<double> v) {
+    final l = v.toList();
+    return l.isEmpty ? 0 : l.reduce((a, b) => a + b) / l.length;
+  }
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context);
     final cs = ChartStyle(context);
     final ys = spots.map((s) => s.y);
-    final avg = ys.reduce((a, b) => a + b) / spots.length;
+    final avg = _mean(ignoreZero ? ys.where((y) => y > 0) : ys);
+    final h = highlight;
+    final part = h == null ? null : spots.where((s) => s.x >= h.startMin && s.x <= h.endMin).map((s) => s.y);
+    final partAvg = part == null ? null : _mean(ignoreZero ? part.where((y) => y > 0) : part);
     final maxV = ys.reduce(math.max);
     final minV = ys.reduce(math.min);
     final isAltitude = unit == 'm';
+
+    // Zoom: Abschnitt mit 15 % Rand je Seite; Wertebereich nach dem sichtbaren Teil
+    var shown = spots;
+    double? x1, x2;
+    if (view != null) {
+      x1 = view!.min;
+      x2 = view!.max;
+      shown = spots.where((s) => s.x >= x1! && s.x <= x2!).toList();
+      if (shown.length < 2) shown = spots;
+    }
+    final shownMax = shown.map((s) => s.y).reduce(math.max);
+    final shownMin = shown.map((s) => s.y).reduce(math.min);
 
     Widget stat(String label, num v) => Padding(
           padding: const EdgeInsets.only(left: Gap.lg),
@@ -308,16 +424,26 @@ class _StreamChart extends StatelessWidget {
           ),
           const SizedBox(width: Gap.sm),
           Expanded(child: Text(title, style: t.textTheme.titleMedium)),
-          if (isAltitude) ...[stat('Min', minV), stat('Max', maxV)] else ...[stat('Ø', avg), stat('Max', maxV)],
+          if (isAltitude) ...[stat('Min', minV), stat('Max', maxV)] else ...[
+            if (partAvg != null && part!.isNotEmpty) stat('Ø Abschnitt', partAvg),
+            stat('Ø', avg),
+            stat('Max', maxV),
+          ],
         ]),
         const SizedBox(height: Gap.lg),
-        SizedBox(
+        ZoomListener(
+          leftInset: 40,
+          onGesture: onGesture,
+          child: SizedBox(
           height: 180,
           child: LineChart(LineChartData(
-            minY: isAltitude ? (minV - (maxV - minV) * 0.1).floorToDouble() : 0,
+            minX: shown == spots ? null : x1,
+            maxX: shown == spots ? null : x2,
+            maxY: shown == spots ? null : (shownMax + (shownMax - shownMin) * 0.1 + 1).ceilToDouble(),
+            minY: isAltitude ? (shownMin - (shownMax - shownMin) * 0.1).floorToDouble() : 0,
             lineBarsData: [
               LineChartBarData(
-                spots: spots,
+                spots: shown,
                 color: color,
                 barWidth: 1.6,
                 dotData: const FlDotData(show: false),
@@ -326,6 +452,11 @@ class _StreamChart extends StatelessWidget {
             ],
             gridData: cs.grid(),
             borderData: FlBorderData(show: false),
+            rangeAnnotations: h == null
+                ? null
+                : RangeAnnotations(verticalRangeAnnotations: [
+                    VerticalRangeAnnotation(x1: h.startMin, x2: h.endMin, color: AppColors.power.withValues(alpha: 0.2)),
+                  ]),
             extraLinesData: ftp == null
                 ? null
                 : ExtraLinesData(horizontalLines: [
@@ -358,9 +489,10 @@ class _StreamChart extends StatelessWidget {
                 sideTitles: SideTitles(
                   showTitles: true,
                   reservedSize: 26,
+                  interval: axisInterval(view?.span ?? (spots.last.x - spots.first.x)),
                   getTitlesWidget: (v, meta) => (v == meta.min || v == meta.max)
                       ? const SizedBox.shrink()
-                      : cs.axisLabel(formatDuration(v * 60)),
+                      : cs.axisLabel(axisTimeLabel(v, meta.appliedInterval)),
                 ),
               ),
             ),
@@ -391,6 +523,7 @@ class _StreamChart extends StatelessWidget {
               ),
             ),
           )),
+        ),
         ),
       ]),
     );

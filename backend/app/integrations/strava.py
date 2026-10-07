@@ -25,7 +25,7 @@ TOKEN_URL = "https://www.strava.com/oauth/token"
 DEAUTH_URL = "https://www.strava.com/oauth/deauthorize"
 API = "https://www.strava.com/api/v3"
 SCOPE = "read,activity:read_all"
-STREAM_KEYS = "time,watts,heartrate,cadence,velocity_smooth,altitude"
+STREAM_KEYS = "time,watts,heartrate,cadence,velocity_smooth,altitude,latlng"
 PAGE_SIZE = 200
 MAX_PAGES = 20  # Obergrenze 4000 Aktivitaeten pro Sync
 
@@ -268,7 +268,7 @@ def resample_1hz(time_s: list[int], values: list[float], max_hold_s: int = 5) ->
 
 def apply_streams(act: Activity, streams: dict[str, list], profile: AthleteProfile) -> None:
     """Speichert Streams und berechnet NP/IF/TSS exakt neu."""
-    act.streams = streams
+    act.streams = {**streams, "latlng": streams.get("latlng") or []}  # [] = Karte abgefragt, aber keine GPS-Daten
     ftp = profile.ftp
     watts = streams.get("watts")
     t = streams.get("time")

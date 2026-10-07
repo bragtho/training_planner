@@ -8,13 +8,15 @@ from sqlalchemy.orm import Session
 from ..db import get_db
 from ..integrations import strava
 from ..metrics.fitness import current_status, pmc_rows
-from ..metrics.power import intensity_factor, tss
+from ..metrics.power import intensity_factor, mean_max_curve, tss
 from ..models import Activity, ActivityInsight, Integration, User
 from ..security import current_user
 
 router = APIRouter(tags=["activities"])
 
 MAX_STREAM_POINTS = 600
+CURVE_DURATIONS = (1, 2, 5, 10, 15, 20, 30, 45, 60, 90, 120, 180, 240, 300, 480, 600, 900, 1200, 1800, 2700, 3600, 5400, 7200,
+                   10800, 14400, 21600)
 
 
 class ActivityOut(BaseModel):
@@ -99,9 +101,29 @@ def get_streams(activity_id: int, user: User = Depends(current_user), db: Sessio
             raise HTTPException(e.status if e.status in (401, 404, 429) else 502, str(e))
         strava.apply_streams(a, streams, user.profile)
         db.commit()
+    elif "latlng" not in a.streams and a.source == "strava":
+        # Aeltere Aktivitaet ohne Kartendaten: GPS einmal nachladen (NP/TSS bleiben unveraendert)
+        integ = db.scalar(select(Integration).where(Integration.user_id == user.id, Integration.provider == "strava"))
+        if integ is not None:
+            try:
+                gps = strava.StravaClient(db, integ).get_streams(a.external_id).get("latlng") or []
+            except strava.StravaError:
+                gps = None  # spaeter erneut versuchen
+            if gps is not None:
+                a.streams = {**a.streams, "latlng": gps}
+                db.commit()
     n = max((len(v) for v in a.streams.values()), default=0)
     step = max(1, -(-n // MAX_STREAM_POINTS))
     return {k: _downsample(v, step) for k, v in a.streams.items()}
+
+
+@router.get("/activities/{activity_id}/power-curve")
+def get_power_curve(activity_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Leistungskurve dieser Fahrt: beste Durchschnittsleistung je Dauer und wo sie gefahren wurde (Startsekunde)."""
+    a = _get(db, user, activity_id)
+    s = a.streams or {}
+    watts = strava.resample_1hz(s.get("time") or [], s.get("watts") or [])
+    return {"points": mean_max_curve(watts, CURVE_DURATIONS)}
 
 
 @router.get("/metrics/pmc")

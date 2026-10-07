@@ -36,6 +36,12 @@ final streamsProvider =
   return Json.from(r.data as Map);
 });
 
+/// Beste Durchschnittsleistung je Dauer dieser Fahrt, mit Startsekunde des besten Abschnitts.
+final powerCurveProvider = FutureProvider.autoDispose.family<List<Json>, int>((ref, id) async {
+  final r = await ref.watch(apiProvider).dio.get('/activities/$id/power-curve');
+  return [for (final p in (r.data as Map)['points'] as List) Json.from(p as Map)];
+});
+
 final profileProvider = FutureProvider.autoDispose<Json>((ref) async {
   final r = await ref.watch(apiProvider).dio.get('/profile');
   return Json.from(r.data as Map);
@@ -95,6 +101,14 @@ String formatDuration(num seconds) {
   final h = s ~/ 3600;
   final m = (s % 3600) ~/ 60;
   return h > 0 ? '$h:${m.toString().padLeft(2, '0')} h' : '$m min';
+}
+
+/// Kurze Dauer fuer Achsen und Chips: 5 s, 90 s, 20 min, 1 h, 1:30 h.
+String shortDuration(int s) {
+  if (s < 120) return '$s s';
+  if (s < 3600) return s % 60 == 0 ? '${s ~/ 60} min' : '${s ~/ 60}:${(s % 60).toString().padLeft(2, '0')} min';
+  final m = (s % 3600) ~/ 60;
+  return m == 0 ? '${s ~/ 3600} h' : '${s ~/ 3600}:${m.toString().padLeft(2, '0')} h';
 }
 
 String formatKm(num meters) => '${(meters / 1000).toStringAsFixed(1)} km';

@@ -61,10 +61,12 @@ def _clean(text: str) -> str:
     return text
 
 
-def _chat_lines(db: Session, user: User) -> tuple[list[str], int]:
-    rows = list(db.scalars(
-        select(CoachMessage).where(CoachMessage.user_id == user.id).order_by(CoachMessage.id.desc()).limit(CHAT_MESSAGES)
-    ))[::-1]
+def _chat_lines(db: Session, user: User, until: dt.date | None = None) -> tuple[list[str], int]:
+    """Letzter Teil des Gespraechs; mit `until` nur Nachrichten bis zum Ende dieses Tages (Rueckblick auf aeltere Fahrten)."""
+    q = select(CoachMessage).where(CoachMessage.user_id == user.id)
+    if until is not None:
+        q = q.where(CoachMessage.created_at < dt.datetime.combine(until + dt.timedelta(days=1), dt.time.min))
+    rows = list(db.scalars(q.order_by(CoachMessage.id.desc()).limit(CHAT_MESSAGES)))[::-1]
     lines = []
     for r in rows:
         t = (r.content.get("text", "") if isinstance(r.content, dict) else str(r.content)).strip()

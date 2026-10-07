@@ -183,6 +183,9 @@ TOOLS: list[dict] = [
             "type": "object",
             "properties": {
                 "text": {"type": "string", "description": f"Der Fakt, hoechstens {MAX_MEMORY_CHARS} Zeichen"},
+                "valid_from": {**_DATE, "description": "Erster Tag, ab dem der Fakt gilt. Bei Phasen und Absprachen (Offseason, Pause, "
+                                                       "Verletzung, Trainingslager) immer setzen; weiss der Athlet es nicht, frage nach. "
+                                                       "Ohne Angabe gilt der Fakt ab heute, nie fuer die Zeit davor."},
                 "valid_until": {**_DATE, "description": "Nur fuer zeitlich begrenzte Fakten (z. B. Offseason): letzter Tag der Gueltigkeit, "
                                                         "danach vergisst Du ihn automatisch. Heute oder spaeter."},
                 "id": {"type": "integer", "description": "id eines vorhandenen Eintrags, der ersetzt werden soll"},
@@ -506,20 +509,31 @@ def update_athlete_notes(db: Session, user: User, args: dict) -> dict:
     return {"saved": changed}
 
 
+def memory_start(m: CoachMemory) -> dt.date | None:
+    """Ab wann ein Eintrag gilt: das gesetzte Startdatum, sonst der Tag, an dem sich der Coach ihn gemerkt hat."""
+    return m.valid_from or (m.created_at.date() if m.created_at else None)
+
+
 def active_memories(db: Session, user_id: int, today: dt.date | None = None) -> list[CoachMemory]:
-    """Gueltige Eintraege (abgelaufene werden ignoriert), aelteste zuerst."""
+    """Eintraege, die an diesem Tag galten (abgelaufene und noch nicht gueltige werden ignoriert), aelteste zuerst.
+
+    Fuer ein frueheres Datum (z. B. Feedback zu einer alten Fahrt) zaehlt nur, was damals schon gemerkt oder per Startdatum
+    gueltig war; Absprachen von heute gelten nicht rueckwirkend."""
     today = today or dt.date.today()
-    return list(db.scalars(
+    rows = db.scalars(
         select(CoachMemory).where(
             CoachMemory.user_id == user_id,
             (CoachMemory.valid_until.is_(None)) | (CoachMemory.valid_until >= today),
         ).order_by(CoachMemory.id)
-    ))
+    )
+    return [m for m in rows if (memory_start(m) or today) <= today]
 
 
 def memory_line(m: CoachMemory) -> str:
-    until = f" (gilt bis {m.valid_until.isoformat()})" if m.valid_until else ""
-    return f"[{m.id}] {m.text}{until}"
+    since = f"gilt ab {m.valid_from.isoformat()}" if m.valid_from else ""
+    until = f"gilt bis {m.valid_until.isoformat()}" if m.valid_until else ""
+    span = ", ".join(x for x in (since, until) if x)
+    return f"[{m.id}] {m.text}" + (f" ({span})" if span else "")
 
 
 def save_memory(db: Session, user: User, args: dict) -> dict:
@@ -533,6 +547,9 @@ def save_memory(db: Session, user: User, args: dict) -> dict:
         until = _date(args["valid_until"], "valid_until")
         if until < dt.date.today():
             raise ToolError("valid_until liegt in der Vergangenheit")
+    since = _date(args["valid_from"], "valid_from") if args.get("valid_from") else None
+    if since and until and since > until:
+        raise ToolError("valid_from liegt nach valid_until")
     mem = None
     if args.get("id") is not None:
         mem = db.get(CoachMemory, args["id"]) if isinstance(args["id"], int) else None
@@ -542,17 +559,18 @@ def save_memory(db: Session, user: User, args: dict) -> dict:
     if mem is None:
         same = next((m for m in current if m.text.casefold() == text.casefold()), None)
         if same is not None:  # schon vorhanden: nichts doppelt speichern, nur Gueltigkeit nachziehen
-            if until and same.valid_until != until:
-                same.valid_until = until
+            if (until and same.valid_until != until) or (since and same.valid_from != since):
+                same.valid_until = until or same.valid_until
+                same.valid_from = since or same.valid_from
                 db.commit()
             return {"saved": memory_line(same), "note": "Eintrag existierte bereits"}
         if len(current) >= MAX_MEMORIES:
             raise ToolError(f"Gedaechtnis ist voll ({MAX_MEMORIES} Eintraege). Fasse Eintraege zusammen "
                             "(save_memory mit id) oder loesche Ueberholtes (forget_memory).")
-        mem = CoachMemory(user_id=user.id, text=text, valid_until=until)
+        mem = CoachMemory(user_id=user.id, text=text, valid_until=until, valid_from=since)
         db.add(mem)
     else:
-        mem.text, mem.valid_until = text, until
+        mem.text, mem.valid_until, mem.valid_from = text, until, since
     db.commit()
     return {"saved": memory_line(mem)}
 

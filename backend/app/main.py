@@ -3,13 +3,14 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .db import Base, engine
+from .db import Base, engine, ensure_columns
 from .routers import activities, atp, auth, coach, insights, knowledge, plans, profile, strava
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     # Fuer Dev; spaeter durch Alembic-Migrationen ersetzen
     Base.metadata.create_all(engine)
+    ensure_columns()
     yield
 
 

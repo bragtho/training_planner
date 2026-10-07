@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:fl_chart/fl_chart.dart';
@@ -15,6 +16,7 @@ import 'activity_analysis.dart';
 import 'activity_map.dart';
 import 'combined_chart.dart';
 import 'highlight.dart';
+import 'laps_card.dart';
 import 'power_curve_card.dart';
 import 'zoom.dart';
 
@@ -141,17 +143,17 @@ class _Header extends StatelessWidget {
 
 const _zoneNames = ['Erholung', 'Ausdauer', 'Tempo', 'Schwelle', 'VO2max', 'Anaerob', 'Neuromuskulär'];
 
-class _Details extends StatefulWidget {
+class _Details extends ConsumerStatefulWidget {
   const _Details({required this.id, required this.streams, required this.ftp});
   final int id;
   final Json streams;
   final num? ftp;
 
   @override
-  State<_Details> createState() => _DetailsState();
+  ConsumerState<_Details> createState() => _DetailsState();
 }
 
-class _DetailsState extends State<_Details> {
+class _DetailsState extends ConsumerState<_Details> {
   Highlight? _selected;
   ViewRange? _view; // null = ganze Fahrt
   bool _combined = false; // alle Daten in einem Diagramm
@@ -173,17 +175,69 @@ class _DetailsState extends State<_Details> {
 
   Json get streams => widget.streams;
 
-  List<FlSpot> _spots(String key) {
-    final t = (streams['time'] as List?) ?? const [];
-    final v = (streams[key] as List?) ?? const [];
+  // Gezoomt: Ausschnitt in voller Aufloesung nachladen (die ganze Fahrt kommt auf ca. 600 Punkte verdichtet)
+  Timer? _debounce;
+  ViewRange? _seenView;
+  (int, int)? _win; // angefragter Ausschnitt in Sekunden
+  (int, int, Json)? _detail; // zuletzt geladener Ausschnitt (von, bis, Streams)
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    super.dispose();
+  }
+
+  void _syncWindow() {
+    if (_view == _seenView) return;
+    _seenView = _view;
+    _debounce?.cancel();
+    final v = _view;
+    if (v == null) {
+      _win = null;
+      _detail = null;
+      return;
+    }
+    final win = _win;
+    final needFrom = v.min * 60, needTo = v.max * 60;
+    // Aktueller Ausschnitt reicht noch (deckt die Ansicht ab und ist nicht viel groeber als noetig)
+    if (win != null && win.$1 <= needFrom && win.$2 >= needTo && (win.$2 - win.$1) <= v.span * 60 * 4) return;
+    _debounce = Timer(const Duration(milliseconds: 250), () {
+      if (!mounted) return;
+      final pad = v.span * 60 * 0.5;
+      final from = (((needFrom - pad) / 10).floor() * 10).clamp(0, double.infinity).toInt();
+      final to = (((needTo + pad) / 10).ceil() * 10).clamp(0, _total * 60 + 10).toInt();
+      setState(() => _win = (from, to));
+    });
+  }
+
+  List<FlSpot> _spotsOf(Json s, String key) {
+    final t = (s['time'] as List?) ?? const [];
+    final v = (s[key] as List?) ?? const [];
     return [
       for (var i = 0; i < v.length && i < t.length; i++)
         if (v[i] != null) FlSpot((t[i] as num) / 60, (v[i] as num).toDouble()),
     ];
   }
 
+  /// Punkte der ganzen Fahrt; im geladenen Ausschnitt die feineren Punkte (ausserhalb bleiben die groben).
+  List<FlSpot> _spots(String key) {
+    final base = _spotsOf(streams, key);
+    final d = _detail;
+    if (d == null || _view == null) return base;
+    final fine = _spotsOf(d.$3, key);
+    if (fine.isEmpty) return base;
+    final lo = d.$1 / 60, hi = d.$2 / 60;
+    return [...base.where((p) => p.x < lo), ...fine, ...base.where((p) => p.x > hi)];
+  }
+
   @override
   Widget build(BuildContext context) {
+    _syncWindow();
+    final win = _win;
+    if (win != null && _view != null) {
+      final loaded = ref.watch(streamsWindowProvider((widget.id, win.$1, win.$2))).value;
+      if (loaded != null) _detail = (win.$1, win.$2, loaded);
+    }
     final charts = <(String, String, String, Color, IconData)>[
       ('watts', 'Leistung', 'W', AppColors.power, Icons.bolt_rounded),
       ('heartrate', 'Herzfrequenz', 'bpm', AppColors.heart, Icons.favorite_rounded),
@@ -211,6 +265,14 @@ class _DetailsState extends State<_Details> {
         ),
         const SizedBox(height: Gap.md),
       ],
+      LapsCard(
+        id: widget.id,
+        ftp: ftp,
+        selected: _selected,
+        zoomed: _sectionZoomed,
+        onSelect: _select,
+        onZoom: (z) => setState(() => _view = z && _selected != null ? _sectionFor(_selected!) : null),
+      ),
       if (hasMap) ...[
         ActivityMapCard(streams: streams, highlight: _selected, zoomed: _sectionZoomed),
         const SizedBox(height: Gap.md),
@@ -517,7 +579,6 @@ class _StreamChart extends StatelessWidget {
                     LineTooltipItem(
                       '${s.y.round()} $unit',
                       cs.tooltipText(color),
-                      children: [TextSpan(text: '\nbei ${formatDuration(s.x * 60)}', style: cs.tooltipTitle)],
                     ),
                 ],
               ),

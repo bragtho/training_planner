@@ -67,7 +67,7 @@ class _ActivityMapCardState extends State<ActivityMapCard> {
             padding: const EdgeInsets.fromLTRB(Gap.lg, Gap.lg, Gap.lg, 0),
             child: SectionHeader(
               title: 'Karte',
-              subtitle: highlight == null ? null : 'Hervorgehoben: beste ${shortDuration(highlight!.durationS)}',
+              subtitle: highlight == null ? null : 'Hervorgehoben: ${highlight!.label ?? 'beste ${shortDuration(highlight!.durationS)}'}',
             ),
           ),
           ClipRRect(

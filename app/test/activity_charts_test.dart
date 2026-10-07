@@ -28,13 +28,25 @@ final _curve = [
   {'duration_s': 1200, 'watts': 250, 'start_s': 0},
 ];
 
-Widget _screen({bool gps = true}) => ProviderScope(
+final _laps = [
+  {'index': 1, 'start_s': 0, 'duration_s': 300, 'distance_m': 2500.0, 'avg_watts': 150.0, 'avg_heartrate': 125.0},
+  {'index': 2, 'start_s': 300, 'duration_s': 270, 'distance_m': 2500.0, 'avg_watts': 320.0, 'avg_heartrate': 135.0},
+];
+
+Widget _screen({bool gps = true, List<Json>? laps}) => ProviderScope(
   overrides: [
     activityProvider(1).overrideWith(
       (ref) async => {'id': 1, 'name': 'Testfahrt', 'start_time': '2026-09-01T08:00:00', 'duration_s': 600, 'distance_m': 5000},
     ),
     streamsProvider(1).overrideWith((ref) async => _streams(gps: gps)),
     powerCurveProvider(1).overrideWith((ref) async => _curve),
+    lapsProvider(1).overrideWith((ref) async => laps ?? _laps),
+    // gezoomter Ausschnitt in Sekundenaufloesung: ein Punkt je Sekunde
+    streamsWindowProvider.overrideWith((ref, key) async {
+      final (_, from, to) = key;
+      final t = [for (var i = from; i <= to && i <= 570; i++) i];
+      return {'time': t, 'watts': [for (final x in t) x == 400 ? 900 : 320]};
+    }),
     profileProvider.overrideWith((ref) async => {'ftp': 300}),
     activityAnalysisProvider(1).overrideWith((ref) => Completer<Json>().future), // Feedback gehoert nicht zu diesem Test
   ],
@@ -90,6 +102,34 @@ void main() {
     expect(find.text('Hervorgehoben: beste 5 min'), findsNothing);
   });
 
+  testWidgets('Runden: Tabelle, Auswahl hebt die Runde hervor und zoomt', (tester) async {
+    await _load(tester, _screen());
+    expect(find.text('Runden'), findsOneWidget);
+    expect(find.text('2500 m'), findsNothing);
+    expect(find.text('2,50 km'), findsNWidgets(2));
+    expect(find.text('320 W'), findsWidgets);
+    await tester.tap(find.text('4:30'));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.textContaining('Runde 2: 320 W, von 5:00 bis 9:30'), findsOneWidget);
+    expect(find.text('Hervorgehoben: Runde 2'), findsOneWidget);
+    expect(find.text('Ø Abschnitt'), findsNWidgets(3));
+    expect(find.textContaining('Beste '), findsNothing); // die Leistungskurve zeigt keine Auswahl an
+    await tester.ensureVisible(find.text('Auf Runde zoomen'));
+    await tester.tap(find.text('Auf Runde zoomen'));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('Ganze Fahrt zeigen'), findsOneWidget);
+    await tester.tap(find.text('4:30')); // erneut tippen hebt die Auswahl auf
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('Ø Abschnitt'), findsNothing);
+  });
+
+  testWidgets('Ohne oder mit nur einer Runde gibt es keine Rundenkarte', (tester) async {
+    await _load(tester, _screen(laps: [_laps.first]));
+    expect(find.text('Runden'), findsNothing);
+    await _load(tester, _screen(laps: const []));
+    expect(find.text('Runden'), findsNothing);
+  });
+
   testWidgets('Zoom zeigt in den Diagrammen nur den Abschnitt und laesst sich zuruecknehmen', (tester) async {
     await _load(tester, _screen());
     expect(find.text('Auf Abschnitt zoomen'), findsNothing); // ohne Auswahl kein Zoom
@@ -109,6 +149,27 @@ void main() {
     await tester.tap(find.text('Auswahl aufheben')); // Auswahl weg -> Zoom auch
     await tester.pump(const Duration(milliseconds: 100));
     expect(datas().where((d) => d.minX == 3.0), isEmpty);
+  });
+
+  testWidgets('Gezoomt werden die Daten des Ausschnitts in hoher Aufloesung nachgeladen', (tester) async {
+    await _load(tester, _screen());
+    int points() => tester.widgetList<LineChart>(find.byType(LineChart)).skip(1).first.data.lineBarsData.first.spots.length;
+    expect(points(), 20); // ganze Fahrt: grob
+    await _pickDuration(tester, 2);
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.tap(find.text('Auf Abschnitt zoomen'));
+    await tester.pump(const Duration(milliseconds: 100));
+    final coarse = points();
+    expect(coarse, lessThan(20)); // nur der sichtbare Teil, noch grob (Nachladen mit kurzer Verzoegerung)
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(points(), greaterThan(coarse * 5));
+    final spots = tester.widgetList<LineChart>(find.byType(LineChart)).skip(1).first.data.lineBarsData.first.spots;
+    expect(spots.any((p) => p.y == 900), isTrue); // die Spitze ist jetzt sichtbar
+    await tester.tap(find.text('Ganze Fahrt zeigen'));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(points(), lessThanOrEqualTo(20)); // ganze Fahrt wieder grob
+    expect(find.text('Auf Abschnitt zoomen'), findsOneWidget);
   });
 
   testWidgets('Allgemeiner Zoom: Hineinzoomen, Verschieben und Zuruecksetzen wirken auf alle Diagramme', (tester) async {
@@ -185,7 +246,7 @@ void main() {
     await mouse.moveTo(c + const Offset(6, 0));
     await tester.pump(const Duration(milliseconds: 100));
     expect(find.textContaining('Berühre oder fahre mit der Maus'), findsNothing); // Werte stehen ausserhalb des Diagramms
-    expect(find.textContaining('bei '), findsOneWidget);
+    expect(find.textContaining(' W'), findsWidgets); // Werte der Reihen stehen in der Anzeige
     await tester.tap(find.text('Trittfrequenz'));
     await tester.pump(const Duration(milliseconds: 100));
     expect(combined().lineBarsData.length, 3);

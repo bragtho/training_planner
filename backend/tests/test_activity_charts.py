@@ -70,3 +70,34 @@ def test_streams_backfill_latlng_once(monkeypatch):
     assert s["latlng"] == [[46.0, 7.0], [46.1, 7.1]] and s["watts"] == [100, 100]  # Watt bleiben unveraendert
     c.get(f"/activities/{aid}/streams", headers=h)
     assert calls == ["9"]  # nur einmal bei Strava nachgeladen
+
+
+def test_laps_fetched_once_and_hidden_from_streams(monkeypatch):
+    c, h = _client()
+    aid = _activity({"time": [0, 1], "watts": [100, 100], "latlng": []})
+    calls = []
+
+    def fake(self, activity_id):
+        calls.append(activity_id)
+        return [
+            {"lap_index": 2, "elapsed_time": 120, "distance": 800.0, "average_watts": 300.0, "average_heartrate": 160.0},
+            {"lap_index": 1, "elapsed_time": 180, "distance": 1400.0, "average_watts": 130.0},
+            {"lap_index": 3, "elapsed_time": 0},
+        ]
+
+    monkeypatch.setattr(strava.StravaClient, "get_laps", fake)
+    laps = c.get(f"/activities/{aid}/laps", headers=h).json()["laps"]
+    assert [(r["index"], r["start_s"], r["duration_s"], r["avg_watts"]) for r in laps] == [(1, 0, 180, 130.0), (2, 180, 120, 300.0)]
+    c.get(f"/activities/{aid}/laps", headers=h)
+    assert calls == ["9"]
+    assert "laps" not in c.get(f"/activities/{aid}/streams", headers=h).json()
+
+
+def test_streams_window_returns_full_resolution_slice():
+    c, h = _client()
+    n = 3000
+    aid = _activity({"time": list(range(n)), "watts": list(range(n)), "latlng": []})
+    full = c.get(f"/activities/{aid}/streams", headers=h).json()
+    assert len(full["time"]) <= 600 and full["time"][1] - full["time"][0] > 1  # ganze Fahrt ist verdichtet
+    win = c.get(f"/activities/{aid}/streams?from_s=1000&to_s=1299", headers=h).json()
+    assert win["time"] == list(range(1000, 1300)) and win["watts"] == list(range(1000, 1300))  # 1-s-Aufloesung

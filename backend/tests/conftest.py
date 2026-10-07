@@ -11,3 +11,4 @@ os.environ["STRAVA_CLIENT_ID"] = "123"
 os.environ["STRAVA_CLIENT_SECRET"] = "shh"
 os.environ["STRAVA_VERIFY_TOKEN"] = "verify-me"
 os.environ["PUBLIC_BASE_URL"] = "http://localhost:8000"
+os.environ["ANTHROPIC_API_KEY"] = ""  # nie echte Modellaufrufe aus Tests (auch nicht aus Hintergrundaufgaben)

@@ -13,13 +13,14 @@ import logging
 from typing import Any
 
 import anthropic
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import atp as A
 from .. import knowledge as K
 from ..config import get_settings
 from ..metrics.fitness import current_status, pmc_rows, weekly_summary
-from ..models import User
+from ..models import Activity, ActivityInsight, User
 from . import tools as T
 
 log = logging.getLogger(__name__)
@@ -42,8 +43,22 @@ Bei kleinen Anfragen (z. B. "plane mir morgen etwas Lockeres") handelst Du sofor
 - Wenn der Athlet einen Plan oder eine Aenderung will, schreibst Du sie selbst in den Kalender (create_workouts / update_workout / delete_workout). \
 Beschreibe danach kurz, was Du geplant hast (Tage, Dauer, TSS) und warum.
 - Lies nach dem Anlegen den Wochenlast-Check im Ergebnis. Bei einer Warnung korrigierst Du den Plan, bevor Du antwortest.
-- Beurteilst Du Training, vergleichst Du Soll und Ist (get_calendar, get_recent_activities) und erklaerst die Ursache in einem Satz, \
+- Beurteilst Du Training, vergleichst Du Soll und Ist (get_activity_analysis, get_calendar) und erklaerst die Ursache in einem Satz, \
 bevor Du anpasst. Ein verpasstes Training holst Du nicht pauschal nach.
+
+# Analyse von Training und Rennen
+Zu jeder Fahrt erstellt die App automatisch Dein Feedback; im Chat analysierst Du auf Nachfrage tiefer.
+- Fragt der Athlet nach einer Fahrt oder einem Rennen, rufe get_activity_analysis auf (ohne Angabe die neueste Fahrt). Ordne ein: Art und Zweck, \
+Soll/Ist je Intervall (getroffen, zu hart, zu locker, Abfall ueber die Serie), Pacing, Entkopplung, Bestwerte, Form vor der Fahrt. \
+Bei Rennen zusaetzlich: Verlauf, Spitzen, Form am Renntag gegenueber dem Ziel, Lehren fuers naechste Rennen und Tage locker danach.
+- Belastung: Vor dem Planen einer Woche und wenn der Athlet fragt, ob es zu viel oder zu wenig ist, rufe get_load_assessment auf. \
+Bei too_much senkst Du die Last der kommenden Tage (mehr Erholung, weniger Intensitaet), bei too_little erhoehst Du sie massvoll, \
+jeweils im Einklang mit Saisonplan und Gedaechtnis (Offseason oder Tapering sind kein Anlass, mehr zu trainieren). Erklaere die Gruende mit den Zahlen.
+- FTP: Wirkt die FTP zu niedrig (Intervalle deutlich ueber Soll, IF ueber 1,0 bei langen Fahrten, viele neue Bestwerte) oder fragt der Athlet, \
+rufe get_ftp_assessment auf. Bei raise nenne den Vorschlag (suggested_ftp) mit Begruendung; der Athlet uebernimmt ihn mit einem Tippen in der App \
+(Uebersicht). Bei test schlage einen FTP-Test vor (z. B. 20-min-Test mit Aufwaermen oder Rampentest) und plane ihn auf Wunsch ein. \
+Eine zu niedrige FTP macht Zonen, TSS und Plaene zu leicht, eine zu hohe zu hart.
+- Ohne Leistungsdaten (nur Puls) urteilst Du vorsichtig und sagst es.
 
 # Gedaechtnis
 Du hast ein dauerhaftes Gedaechtnis ueber den Athleten (save_memory, forget_memory). Es steht unten im Kontext und ist in jeder Unterhaltung da. Entscheide selbst, was hinein gehoert, ohne dass der Athlet darum bitten muss, und frage nicht um Erlaubnis.
@@ -90,12 +105,13 @@ Freie Ausfahrten ohne Struktur gehen mit planned_duration_s und planned_tss.
 # Grenzen
 - Du bist kein Arzt. Bei Schmerzen in der Brust, Atemnot, Schwindel, Verletzungen, Herz-Kreislauf-Beschwerden oder anhaltender Erschoepfung \
 rate Du zu Pause und aerztlicher Abklaerung und plane nichts Intensives. Keine Diagnosen, keine Medikamente, keine Diaeten.
-- Die FTP und Herzfrequenzwerte aenderst Du nicht selbst; Du kannst einen FTP-Test oder neue Werte vorschlagen.
+- Die FTP und Herzfrequenzwerte aenderst Du nicht selbst; Du schlaegst neue Werte oder einen Test vor, der Athlet bestaetigt in der App.
 - TSS-Werte aus Strava ohne Powermeter sind Schaetzungen. Weise bei grossen Unsicherheiten darauf hin.
 
 # Antwortstil
 Kurz und klar. Nutze kurze Absaetze oder Listen, keine Ueberschriften. Nenne konkrete Zahlen (Watt, Minuten, TSS). \
-Wiederhole nicht, was in den Werkzeugergebnissen steht, sondern ordne es ein."""
+Wiederhole nicht, was in den Werkzeugergebnissen steht, sondern ordne es ein. Nenne keine internen Namen von Werkzeugen \
+oder Feldern (z. B. too_little, get_load_assessment), sondern sag es in Alltagssprache."""
 
 
 class CoachError(Exception):
@@ -121,6 +137,16 @@ def build_context(db: Session, user: User, today: dt.date | None = None) -> str:
                   "TSS je Woche (aelteste zuerst): " + ", ".join(str(w["tss"]) for w in weekly_summary(db, user.id, 6, today))]
     else:
         lines += ["", "Es liegen noch keine Trainingsdaten mit TSS vor."]
+    recent = db.execute(
+        select(Activity.id, Activity.start_time, Activity.name, ActivityInsight.feedback)
+        .join(ActivityInsight, ActivityInsight.activity_id == Activity.id)
+        .where(Activity.user_id == user.id, ActivityInsight.feedback.is_not(None))
+        .order_by(Activity.start_time.desc()).limit(3)
+    ).all()
+    if recent:
+        lines += ["", "Dein letztes Feedback zu Fahrten (Details mit get_activity_analysis):"]
+        lines += [f"- {r.start_time.date().isoformat()} {r.name or 'Fahrt'} (id {r.id}): {(r.feedback or {}).get('headline', '')}"
+                  for r in recent]
     lines += ["", "Saisonplan (ATP):"] + A.context_lines(db, user.id, today)
     lines += ["", "Gedaechtnis (id in Klammern):"] + ([f"- {T.memory_line(m)}" for m in memories] or ["- noch leer"])
     return "\n".join(lines)

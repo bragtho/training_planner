@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     # Bei Ablehnung durch die Sicherheitsfilter uebernimmt serverseitig ein Ersatzmodell
     coach_refusal_fallback: bool = True
     coach_daily_message_limit: int = 100
+    # Obergrenze fuer Trainings-Feedback je Tag (ein Modellaufruf je Fahrt)
+    coach_feedback_daily_limit: int = 30
     # Schluessel fuer die Verwaltungs-Schnittstelle der Wissensbasis (Wissens-Manager); leer = Schnittstelle gesperrt
     knowledge_admin_token: str = ""
 

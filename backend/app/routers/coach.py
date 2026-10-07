@@ -33,8 +33,17 @@ QUICK_PROMPTS = {
         "typischen Wochenzielen (TSS) und der erwarteten Form am Event kurz zusammen."
     ),
     "review_last": (
-        "Werte mein letztes Training aus. Vergleiche es mit dem Plan und meiner aktuellen Form (CTL, ATL, TSB) und sag mir, "
+        "Werte mein letztes Training aus (get_activity_analysis). Vergleiche es mit dem Plan und meiner aktuellen Form (CTL, ATL, TSB) und sag mir, "
         "was gut war und worauf ich achten soll. Passe die kommenden Tage im Kalender nur an, wenn es wirklich noetig ist."
+    ),
+    "check_load": (
+        "Trainiere ich gerade zu viel, zu wenig oder passend? Schau Dir die Belastungsbewertung (get_load_assessment), meine letzten Fahrten "
+        "und den Saisonplan an und erklaere es mir mit den wichtigsten Zahlen. Wenn es noetig ist, passe die kommenden Tage im Kalender an "
+        "und sag mir, was Du geaendert hast."
+    ),
+    "check_ftp": (
+        "Pruefe, ob meine FTP noch stimmt (get_ftp_assessment). Erklaere das Ergebnis kurz. Ist sie zu niedrig, nenne mir den neuen Wert; "
+        "ist sie nicht bestaetigt, schlag mir einen passenden FTP-Test vor."
     ),
 }
 
@@ -47,7 +56,7 @@ class ChatIn(BaseModel):
 
 
 class QuickIn(BaseModel):
-    action: Literal["plan_week", "plan_season", "review_last"]
+    action: Literal["plan_week", "plan_season", "review_last", "check_load", "check_ftp"]
 
 
 class MessageOut(BaseModel):
@@ -170,7 +179,7 @@ def quick(body: QuickIn, user: User = Depends(current_user), db: Session = Depen
     # Planen ist die anspruchsvollste Aufgabe: staerkeres Modell und hoeherer Aufwand
     if body.action in ("plan_week", "plan_season"):
         return _run(db, user, QUICK_PROMPTS[body.action], s.coach_planning_model, "high")
-    return _run(db, user, QUICK_PROMPTS["review_last"], s.coach_chat_model, "medium")
+    return _run(db, user, QUICK_PROMPTS[body.action], s.coach_chat_model, "medium")
 
 
 @router.delete("/messages", status_code=204)

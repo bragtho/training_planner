@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -7,6 +7,7 @@ import httpx
 
 from ..config import get_settings
 from ..db import get_db
+from .. import insights
 from ..integrations import strava
 from ..models import Activity, Integration, User
 from ..security import create_state_token, current_user, read_state_token
@@ -72,12 +73,15 @@ def callback(
 
 
 @router.post("/integrations/strava/sync")
-def sync(full: bool = False, user: User = Depends(current_user), db: Session = Depends(get_db)):
+def sync(background: BackgroundTasks, full: bool = False, user: User = Depends(current_user), db: Session = Depends(get_db)):
     integ = _require_connected(db, user)
     try:
-        return strava.sync_activities(db, integ, user.profile, full=full)
+        result = strava.sync_activities(db, integ, user.profile, full=full)
     except strava.StravaError as e:
         raise HTTPException(e.status if e.status in (401, 429) else 502, str(e))
+    # Coach-Feedback fuer frische Fahrten im Hintergrund (nur die letzten Tage, nicht die ganze Historie)
+    background.add_task(insights.auto_feedback, user.id, result.get("new_ids", []))
+    return result
 
 
 @router.delete("/integrations/strava", status_code=204)
@@ -119,10 +123,16 @@ def webhook_verify(
 
 
 @router.post("/webhooks/strava")
-async def webhook_event(request: Request, db: Session = Depends(get_db)):
+async def webhook_event(request: Request, background: BackgroundTasks, db: Session = Depends(get_db)):
     event = await request.json()
     try:
         result = strava.handle_webhook_event(db, event)
     except strava.StravaError:
         result = "error"  # Strava erwartet trotzdem 200, sonst wiederholt es den Aufruf
+    if result == "upserted" and event.get("aspect_type") == "create":
+        act = db.scalar(select(Activity).join(Integration, Integration.user_id == Activity.user_id).where(
+            Integration.provider == "strava", Integration.external_user_id == str(event.get("owner_id")),
+            Activity.source == "strava", Activity.external_id == str(event.get("object_id"))))
+        if act is not None:  # Feedback erst nach der Antwort an Strava erzeugen
+            background.add_task(insights.auto_feedback, act.user_id, [act.id])
     return PlainTextResponse(result)

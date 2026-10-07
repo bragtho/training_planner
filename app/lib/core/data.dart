@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
@@ -126,5 +127,31 @@ int isoWeek(DateTime d) {
 /// Wissenskarte fuer das Quellen-Sheet im Chat (Empfehlung, Evidenz, Grenzen, Quellen).
 final knowledgeCardProvider = FutureProvider.autoDispose.family<Json, String>((ref, slug) async {
   final r = await ref.watch(apiProvider).dio.get('/knowledge/cards/$slug');
+  return Json.from(r.data as Map);
+});
+
+/// Analyse einer Fahrt (Kennzahlen, Soll/Ist, gespeichertes Coach-Feedback). Laedt fehlende Sensordaten im Backend nach.
+final activityAnalysisProvider = FutureProvider.autoDispose.family<Json, int>((ref, id) async {
+  final r = await ref.watch(apiProvider).dio.get('/activities/$id/analysis');
+  return Json.from(r.data as Map);
+});
+
+/// Erstellt das Feedback des Coaches zu einer Fahrt (ein Modellaufruf, einige Sekunden) oder liefert das gespeicherte.
+final activityFeedbackProvider = FutureProvider.autoDispose.family<Json, int>((ref, id) async {
+  final r = await ref.watch(apiProvider).dio.post('/activities/$id/feedback',
+      options: Options(receiveTimeout: const Duration(minutes: 2)));
+  return Json.from((r.data as Map)['feedback'] as Map);
+});
+
+/// Bewertung der Trainingsbelastung mit Einordnung des Coaches (beruecksichtigt Gedaechtnis und Gespraech).
+final loadCheckProvider = FutureProvider.autoDispose<Json>((ref) async {
+  final r = await ref.watch(apiProvider).dio.get('/metrics/load-check',
+      queryParameters: {'coach': true}, options: Options(receiveTimeout: const Duration(minutes: 1)));
+  return Json.from(r.data as Map);
+});
+
+/// Pruefung, ob die eingestellte FTP zu den Leistungen der letzten Wochen passt.
+final ftpCheckProvider = FutureProvider.autoDispose<Json>((ref) async {
+  final r = await ref.watch(apiProvider).dio.get('/metrics/ftp-check');
   return Json.from(r.data as Map);
 });

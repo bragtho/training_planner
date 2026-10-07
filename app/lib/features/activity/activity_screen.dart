@@ -509,7 +509,7 @@ class _StreamChart extends StatelessWidget {
                 color: color,
                 barWidth: 1.6,
                 dotData: const FlDotData(show: false),
-                belowBarData: cs.area(color, opacity: isAltitude ? 0.35 : 0.25),
+                belowBarData: isAltitude ? BarAreaData(show: true, color: color.withValues(alpha: 0.22)) : cs.area(color, opacity: 0.25),
               ),
             ],
             gridData: cs.grid(),

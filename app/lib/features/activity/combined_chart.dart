@@ -49,6 +49,10 @@ class _CombinedChartState extends State<CombinedChart> {
     final t = Theme.of(context);
     final cs = ChartStyle(context);
     final active = [for (final s in widget.series) if (_shown.contains(s.key)) s];
+    // Zeichenreihenfolge von hinten nach vorn: Hoehe (graue Flaeche), Trittfrequenz, Herzfrequenz, Leistung ganz vorn
+    const back = ['altitude', 'cadence', 'heartrate', 'watts'];
+    int rank(ChartSeries s) => back.contains(s.key) ? back.indexOf(s.key) : back.length;
+    final drawn = [...active]..sort((a, b) => rank(a).compareTo(rank(b)));
     final h = widget.highlight;
     final v = widget.view;
 
@@ -95,12 +99,15 @@ class _CombinedChartState extends State<CombinedChart> {
               maxX: v?.max,
               clipData: const FlClipData.all(),
               lineBarsData: [
-                for (final s in active)
+                for (final s in drawn)
                   LineChartBarData(
                     spots: [for (final p in s.spots) FlSpot(p.x, s.norm(p.y))],
                     color: s.color,
                     barWidth: 1.6,
                     dotData: const FlDotData(show: false),
+                    belowBarData: s.key == 'altitude'
+                        ? BarAreaData(show: true, color: s.color.withValues(alpha: 0.22))
+                        : BarAreaData(show: false),
                   ),
               ],
               gridData: cs.grid(interval: 0.25),
@@ -130,7 +137,7 @@ class _CombinedChartState extends State<CombinedChart> {
                 touchCallback: (event, response) {
                   final hits = response?.lineBarSpots;
                   if (hits == null || hits.isEmpty) return;
-                  final values = {for (final sp in hits) active[sp.barIndex].key: active[sp.barIndex].spots[sp.spotIndex].y};
+                  final values = {for (final sp in hits) drawn[sp.barIndex].key: drawn[sp.barIndex].spots[sp.spotIndex].y};
                   final x = hits.first.x;
                   if (x != _touchX) {
                     setState(() {

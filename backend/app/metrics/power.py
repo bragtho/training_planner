@@ -52,20 +52,45 @@ def tss(duration_s: float, np_watts: float, ftp: float) -> float:
     return duration_s * np_watts * if_ / (ftp * 3600) * 100
 
 
-def hr_tss(duration_s: float, avg_hr: float, hr_rest: float, hr_max: float, lthr: float) -> float:
-    """Grobe HF-basierte TSS-Schaetzung (TRIMP-Verhaeltnis zur Stunde bei LTHR), falls keine Leistung vorliegt."""
-    if hr_max <= hr_rest or duration_s <= 0:
-        return 0.0
-    from math import exp
+# hrTSS wie bei TrainingPeaks: Zeit in Herzfrequenzzonen (bezogen auf die Schwellenherzfrequenz LTHR) mal TSS je Stunde der Zone.
+# Zonengrenzen in % der LTHR nach Joe Friel (Rad / Laufen); eine Stunde in Zone 5a entspricht 100 TSS (Beispiel in der
+# TrainingPeaks-Hilfe). Die uebrigen Stundenwerte sind eine Annaeherung, TrainingPeaks veroeffentlicht die Tabelle nicht.
+HR_ZONE_BOUNDS = {"bike": (81, 90, 94, 100, 103, 107), "run": (85, 90, 95, 100, 103, 107)}
+HR_ZONE_TSS_PER_HOUR = (20, 40, 60, 80, 100, 120, 140)  # Z1, Z2, Z3, Z4, Z5a, Z5b, Z5c
 
-    def trimp_per_min(hr: float) -> float:
-        x = min(max((hr - hr_rest) / (hr_max - hr_rest), 0.0), 1.0)
-        return x * 0.64 * exp(1.92 * x)
 
-    hour_at_lthr = 60 * trimp_per_min(lthr)
-    if hour_at_lthr <= 0:
+def hr_zone_index(hr: float, lthr: float, kind: str = "bike") -> int:
+    pct = hr / lthr * 100
+    return sum(pct >= b for b in HR_ZONE_BOUNDS[kind])
+
+
+def hr_tss(duration_s: float, avg_hr: float, lthr: float, kind: str = "bike") -> float:
+    """hrTSS aus der Durchschnittsherzfrequenz (Naeherung, wenn keine Herzfrequenzkurve vorliegt)."""
+    if lthr <= 0 or duration_s <= 0 or avg_hr <= 0:
         return 0.0
-    return duration_s / 60 * trimp_per_min(avg_hr) / hour_at_lthr * 100
+    return duration_s / 3600 * HR_ZONE_TSS_PER_HOUR[hr_zone_index(avg_hr, lthr, kind)]
+
+
+def hr_tss_series(time_s: Sequence[float], hr: Sequence[float | None], lthr: float, kind: str = "bike", max_gap_s: float = 10) -> float:
+    """hrTSS aus der Herzfrequenzkurve: jede Sekunde zaehlt mit dem Stundenwert ihrer Zone, Luecken ueber max_gap_s nicht."""
+    if lthr <= 0 or len(time_s) < 2:
+        return 0.0
+    total = 0.0
+    for i in range(len(time_s) - 1):
+        v = hr[i] if i < len(hr) else None
+        if not v or v <= 0:
+            continue
+        dt = min(time_s[i + 1] - time_s[i], max_gap_s)
+        if dt > 0:
+            total += dt / 3600 * HR_ZONE_TSS_PER_HOUR[hr_zone_index(v, lthr, kind)]
+    return total
+
+
+def effective_lthr(lthr: float | None, hr_max: float | None) -> float | None:
+    """Schwellenherzfrequenz aus dem Profil; fehlt sie, wird sie als 90 % der maximalen Herzfrequenz geschaetzt."""
+    if lthr:
+        return float(lthr)
+    return round(hr_max * 0.9) if hr_max else None
 
 
 def mean_max_power(watts: Sequence[float], durations_s: Sequence[int]) -> dict[int, float]:

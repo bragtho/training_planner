@@ -20,6 +20,7 @@ from .. import insights as I
 from .. import knowledge as K
 from ..models import Activity, AtpWeek, CoachMemory, PlannedWorkout, User
 from ..exercises import EXERCISES
+from ..metrics.sports import is_cycling
 from ..metrics.workout import is_strength
 from ..routers.plans import WorkoutIn, _apply, calendar_data
 
@@ -387,7 +388,7 @@ def get_recent_activities(db: Session, user: User, args: dict) -> dict:
         .order_by(Activity.start_time.desc()).limit(60)
     )
     return {"activities": [
-        {"id": a.id, "date": a.start_time.date().isoformat(), "name": a.name, "duration_min": round(a.duration_s / 60),
+        {"id": a.id, "date": a.start_time.date().isoformat(), "name": a.name, "sport": a.sport, "duration_min": round(a.duration_s / 60),
          "distance_km": round(a.distance_m / 1000, 1), "elevation_m": round(a.elevation_m) if a.elevation_m else None,
          "avg_power_w": round(a.avg_power) if a.avg_power else None, "np_w": round(a.norm_power) if a.norm_power else None,
          "if": round(a.intensity_factor, 2) if a.intensity_factor else None,
@@ -625,11 +626,13 @@ def get_knowledge(db: Session, user: User, args: dict) -> dict:
 
 
 def _activity_arg(db: Session, user: User, args: dict) -> Activity:
-    q = select(Activity).where(Activity.user_id == user.id)
+    q = select(Activity).where(Activity.user_id == user.id, Activity.sport.like("%Ride%"))
     if args.get("activity_id") is not None:
         a = db.get(Activity, _int(args.get("activity_id"), 0, 0, 2**31 - 1))
         if a is None or a.user_id != user.id:
             raise ToolError("Aktivitaet nicht gefunden")
+        if not is_cycling(a.sport):
+            raise ToolError(f"Auswertung gibt es nur fuer Radtrainings (diese Aktivitaet ist: {a.sport})")
         return a
     if args.get("date"):
         day = _date(args["date"], "date")

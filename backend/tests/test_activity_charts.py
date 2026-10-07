@@ -101,3 +101,14 @@ def test_streams_window_returns_full_resolution_slice():
     assert len(full["time"]) <= 600 and full["time"][1] - full["time"][0] > 1  # ganze Fahrt ist verdichtet
     win = c.get(f"/activities/{aid}/streams?from_s=1000&to_s=1299", headers=h).json()
     assert win["time"] == list(range(1000, 1300)) and win["watts"] == list(range(1000, 1300))  # 1-s-Aufloesung
+
+
+def test_analysis_and_feedback_only_for_cycling():
+    c, h = _client()
+    aid = _activity({"time": [0, 1], "heartrate": [120, 121], "latlng": []})
+    with SessionLocal() as db:
+        db.get(Activity, aid).sport = "Run"
+        db.commit()
+    r = c.get(f"/activities/{aid}/analysis", headers=h)
+    assert r.status_code == 200 and r.json() == {"supported": False, "sport": "Run"}
+    assert c.post(f"/activities/{aid}/feedback", headers=h).status_code == 422

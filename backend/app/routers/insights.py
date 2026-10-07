@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from .. import insights as I
 from ..config import get_settings
 from ..db import get_db
+from ..metrics.sports import is_cycling
 from ..models import Activity, User
 from ..security import current_user
 
@@ -24,6 +25,8 @@ def _activity(db: Session, user: User, activity_id: int) -> Activity:
 def analysis(activity_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
     """Auswertung einer Fahrt (laedt fehlende Sensordaten bei Strava) samt gespeichertem Feedback des Coaches."""
     act = _activity(db, user, activity_id)
+    if not is_cycling(act.sport):
+        return {"supported": False, "sport": act.sport}  # Auswertung und Feedback gibt es nur fuer Radtrainings
     report = I.activity_report(db, user, act)
     row = I.insight_row(db, act)
     db.commit()

@@ -20,6 +20,7 @@ from . import atp as A
 from .config import get_settings
 from .db import SessionLocal
 from .integrations import strava
+from .metrics.sports import is_cycling
 from .metrics import analysis as AN
 from .metrics.fitness import pmc_rows
 from .metrics.power import POWER_ZONES
@@ -427,6 +428,8 @@ def generate_feedback(db: Session, user: User, act: Activity, *, client: Any = N
     from .coach.agent import _client, _stream, build_context  # spaet importiert: agent importiert die Werkzeuge
 
     settings = get_settings()
+    if not is_cycling(act.sport):
+        raise InsightError("Feedback gibt es nur für Radtrainings", 422)
     row = insight_row(db, act)
     if row.feedback and not force:
         return row.feedback
@@ -501,7 +504,7 @@ def auto_feedback(user_id: int, activity_ids: list[int]) -> None:
             if done >= AUTO_FEEDBACK_MAX:
                 break
             act = db.get(Activity, aid)
-            if act is None or act.user_id != user_id or act.start_time.replace(tzinfo=None) < cutoff:
+            if act is None or act.user_id != user_id or not is_cycling(act.sport) or act.start_time.replace(tzinfo=None) < cutoff:
                 continue
             row = insight_row(db, act)
             if row.feedback:
@@ -700,4 +703,4 @@ def after_import(user_id: int, activity_ids: list[int]) -> None:
         auto_feedback(user_id, activity_ids)
     finally:
         if activity_ids:
-            auto_adjust_ftp(user_id)
+            auto_adjust_ftp(user_id)  # beruecksichtigt nur Fahrten mit Leistung

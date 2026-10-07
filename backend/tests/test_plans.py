@@ -196,3 +196,23 @@ def test_free_named_exercises_are_matched_to_catalog():
         db.commit()
     again = c.get(f"/workouts/{w['id']}", headers=h).json()
     assert again["structure"][0]["exercise_id"] == "glute_bridge"
+
+
+def test_planned_workouts_only_match_their_own_sport():
+    from app.models import Activity
+
+    c, h = _client()
+    day = dt.date.today() - dt.timedelta(days=1)
+    for title, structure in (("Rad", [leaf("steady", 60, 70)]), ("Kraft", [ex("Kniebeuge", 3, reps=8)])):
+        r = c.post("/workouts", json={"date": day.isoformat(), "title": title, "structure": structure}, headers=h)
+        assert r.status_code == 201, r.text
+    with SessionLocal() as db:
+        u = db.query(User).one()
+        for i, sport in enumerate(("Run", "WeightTraining")):
+            db.add(Activity(user_id=u.id, source="strava", external_id=str(i), sport=sport, name=sport,
+                            start_time=dt.datetime.combine(day, dt.time(8)), duration_s=1800, tss=20))
+        db.commit()
+    cal = c.get(f"/calendar?start={day}&end={day}", headers=h).json()
+    st = {w["title"]: w["status"] for w in cal["workouts"]}
+    assert st == {"Rad": "missed", "Kraft": "completed"}  # Lauf erfuellt das Radtraining nicht, Krafttraining das Kraftprogramm
+    assert len(cal["activities"]) == 2

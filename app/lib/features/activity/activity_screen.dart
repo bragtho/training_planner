@@ -10,6 +10,7 @@ import 'package:intl/intl.dart';
 import '../../core/api.dart';
 import '../../core/charts.dart';
 import '../../core/data.dart';
+import '../../core/sport.dart';
 import '../../core/theme.dart';
 import '../../core/ui.dart';
 import 'activity_analysis.dart';
@@ -55,7 +56,8 @@ class ActivityScreen extends ConsumerWidget {
             data: (a) => _Header(a: a),
           ),
           const SizedBox(height: Gap.xl),
-          ActivityAnalysisSection(id: id),
+          // Auswertung und Feedback gibt es nur fuer Radtraining
+          if (act.hasValue && isCyclingSport(act.value!['sport'] as String?)) ActivityAnalysisSection(id: id),
           streams.when(
             loading: () => SurfaceCard(
               child: Row(children: [
@@ -87,6 +89,8 @@ class _Header extends StatelessWidget {
     final date = DateTime.parse(a['start_time'] as String);
     final ifac = a['intensity_factor'] as num?;
     final zone = ifac == null ? null : AppColors.zoneIndex(ifac * 100);
+    final sport = a['sport'] as String?;
+    final hrBased = a['norm_power'] == null; // ohne Leistungsmesser: hrTSS aus der Herzfrequenz
     final tiles = <Widget>[
       MetricTile(compact: true, label: 'Dauer', value: formatDuration(a['duration_s'] as num), icon: Icons.schedule_rounded, color: t.colorScheme.primary),
       MetricTile(compact: true, label: 'Distanz', value: (((a['distance_m'] as num) / 1000)).toStringAsFixed(1), unit: 'km', icon: Icons.route_rounded, color: AppColors.accent),
@@ -117,11 +121,14 @@ class _Header extends StatelessWidget {
       if (n('tss') != null)
         MetricTile(
           compact: true,
-          label: 'TSS',
+          label: hrBased ? 'hrTSS' : 'TSS',
           value: n('tss')!,
           icon: Icons.fitness_center_rounded,
           color: AppColors.tsb,
-          help: 'Training Stress Score: Belastung aus Dauer und Intensität. 100 TSS entsprechen einer Stunde an der FTP.',
+          help: hrBased
+              ? 'Belastung aus der Zeit in Herzfrequenzzonen, bezogen auf Deine Schwellenherzfrequenz (hrTSS wie bei TrainingPeaks, eine Näherung). '
+                  'Eine Stunde an der Schwelle entspricht etwa 100.'
+              : 'Training Stress Score: Belastung aus Dauer und Intensität. 100 TSS entsprechen einer Stunde an der FTP.',
         ),
       if (n('avg_hr') != null)
         MetricTile(compact: true, label: 'Ø Puls', value: n('avg_hr')!, unit: 'bpm', icon: Icons.favorite_rounded, color: AppColors.heart),
@@ -130,7 +137,11 @@ class _Header extends StatelessWidget {
       Text(DateFormat("EEEE, d. MMMM yyyy · HH:mm 'Uhr'", 'de').format(date).toUpperCase(),
           style: t.textTheme.labelMedium?.copyWith(color: t.colorScheme.primary, fontWeight: FontWeight.w700, letterSpacing: 1.1)),
       const SizedBox(height: 2),
-      Text(a['name'] as String? ?? 'Fahrt', style: t.textTheme.headlineMedium),
+      Text(a['name'] as String? ?? sportInfo(sport).label, style: t.textTheme.headlineMedium),
+      if (!isCyclingSport(sport)) ...[
+        const SizedBox(height: Gap.sm),
+        Pill(label: sportInfo(sport).label, color: AppColors.accent, icon: sportInfo(sport).icon),
+      ],
       if (zone != null) ...[
         const SizedBox(height: Gap.sm),
         Pill(label: 'Intensität: ${_zoneNames[zone]}', color: AppColors.zones[zone], icon: Icons.local_fire_department_rounded),

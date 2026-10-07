@@ -7,6 +7,7 @@ import datetime as dt
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from .sports import is_cycling
 from ..models import Activity
 from .load import compute_pmc, weekly_ramp_rate
 
@@ -58,5 +59,5 @@ def weekly_summary(db: Session, user_id: int, weeks: int = 8, today: dt.date | N
         if w is not None:
             w["tss"] += a.tss or 0.0
             w["hours"] += (a.duration_s or 0) / 3600
-            w["rides"] += 1
+            w["rides"] += 1 if is_cycling(a.sport) else 0
     return [{**w, "tss": round(w["tss"]), "hours": round(w["hours"], 1)} for w in out.values()]

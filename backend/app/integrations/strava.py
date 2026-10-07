@@ -16,7 +16,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
-from ..metrics.power import hr_tss, intensity_factor, normalized_power, tss
+from ..metrics.power import effective_lthr, hr_tss, hr_tss_series, intensity_factor, normalized_power, tss
+from ..metrics.sports import is_cycling as sport_is_cycling, is_run_like
 from ..models import Activity, AthleteProfile, Integration
 from ..security import decrypt, encrypt
 
@@ -161,7 +162,11 @@ class StravaClient:
 
 
 def is_cycling(d: dict) -> bool:
-    return "Ride" in (d.get("sport_type") or d.get("type") or "")
+    return sport_is_cycling(d.get("sport_type") or d.get("type"))
+
+
+def _hr_kind(sport: str | None) -> str:
+    return "run" if is_run_like(sport) else "bike"
 
 
 def _parse_dt(s: str) -> datetime:
@@ -183,7 +188,7 @@ def activity_fields(d: dict, profile: AthleteProfile) -> dict:
         avg_power=None, norm_power=None, intensity_factor=None, tss=None, ftp_used=None,
     )
     ftp = profile.ftp
-    if d.get("device_watts") and d.get("average_watts"):
+    if is_cycling(d) and d.get("device_watts") and d.get("average_watts"):
         avg = float(d["average_watts"])
         # Falls Strava keine NP liefert: Schaetzung, wird mit Streams exakt berechnet
         np_ = float(d.get("weighted_average_watts") or avg * 1.05)
@@ -191,8 +196,9 @@ def activity_fields(d: dict, profile: AthleteProfile) -> dict:
             avg_power=avg, norm_power=np_, intensity_factor=intensity_factor(np_, ftp),
             tss=tss(dur, np_, ftp), ftp_used=ftp,
         )
-    elif d.get("average_heartrate") and profile.hr_max and profile.hr_rest and profile.lthr:
-        f["tss"] = hr_tss(dur, d["average_heartrate"], profile.hr_rest, profile.hr_max, profile.lthr)
+    elif d.get("average_heartrate") and effective_lthr(profile.lthr, profile.hr_max):
+        # Ohne Leistungsmesser (oder andere Sportart): hrTSS wie bei TrainingPeaks, mit Streams genauer
+        f["tss"] = hr_tss(dur, d["average_heartrate"], effective_lthr(profile.lthr, profile.hr_max), _hr_kind(f["sport"]))
     return f
 
 
@@ -238,8 +244,6 @@ def sync_activities(
             break
         for d in items:
             newest = max(newest, int(_parse_dt(d["start_date"]).timestamp()))
-            if not is_cycling(d):
-                continue
             if upsert_activity(db, integ.user_id, d, profile):
                 created += 1
                 new_ext.append(str(d["id"]))
@@ -298,6 +302,13 @@ def apply_streams(act: Activity, streams: dict[str, list], profile: AthleteProfi
     ftp = profile.ftp
     watts = streams.get("watts")
     t = streams.get("time")
+    lthr = effective_lthr(profile.lthr, profile.hr_max)
+    if not (watts and t and sport_is_cycling(act.sport)):
+        # Kein Leistungsmesser oder andere Sportart: hrTSS aus der Herzfrequenzkurve
+        hr = streams.get("heartrate")
+        if hr and t and lthr:
+            act.tss = hr_tss_series(t, hr, lthr, _hr_kind(act.sport))
+        return
     if watts and t:
         w1 = resample_1hz(t, watts)
         np_ = normalized_power(w1)
@@ -337,7 +348,6 @@ def handle_webhook_event(db: Session, event: dict, http: httpx.Client | None = N
         return "deleted"
     profile = db.scalar(select(AthleteProfile).where(AthleteProfile.user_id == integ.user_id))
     d = StravaClient(db, integ, http).get_activity(aid)
-    if is_cycling(d):
-        upsert_activity(db, integ.user_id, d, profile)
-        db.commit()
+    upsert_activity(db, integ.user_id, d, profile)
+    db.commit()
     return "upserted"

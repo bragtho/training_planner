@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import '../../core/api.dart';
 import '../../core/charts.dart';
 import '../../core/data.dart';
+import '../../core/sport.dart';
 import '../../core/theme.dart';
 import '../../core/ui.dart';
 import 'load_style.dart';
@@ -615,7 +616,7 @@ class ActivityTile extends StatelessWidget {
             width: 48,
             height: 48,
             decoration: BoxDecoration(color: c.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(Radii.md)),
-            child: Icon(Icons.directions_bike_rounded, color: c),
+            child: Icon(sportInfo(a['sport'] as String?).icon, color: c),
           ),
           const SizedBox(width: Gap.md),
           Expanded(
@@ -623,7 +624,7 @@ class ActivityTile extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  a['name'] as String? ?? 'Fahrt',
+                  a['name'] as String? ?? sportInfo(a['sport'] as String?).label,
                   style: t.textTheme.titleSmall,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,

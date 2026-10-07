@@ -84,6 +84,21 @@ def mean_max_power(watts: Sequence[float], durations_s: Sequence[int]) -> dict[i
     return out
 
 
+def mean_max_curve(watts: Sequence[float], durations_s: Sequence[int]) -> list[dict]:
+    """Beste Durchschnittsleistung je Dauer mit Startsekunde des besten Abschnitts (1-Hz-Daten)."""
+    n = len(watts)
+    prefix = [0.0]
+    for w in watts:
+        prefix.append(prefix[-1] + w)
+    out = []
+    for d in durations_s:
+        if d <= 0 or d > n:
+            continue
+        start = max(range(n - d + 1), key=lambda i: prefix[i + d] - prefix[i])
+        out.append({"duration_s": d, "watts": round((prefix[start + d] - prefix[start]) / d, 1), "start_s": start})
+    return out
+
+
 def variability_index(np_watts: float, avg_watts: float) -> float:
     return np_watts / avg_watts if avg_watts > 0 else 0.0
 

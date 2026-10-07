@@ -13,6 +13,7 @@ abstract final class AppColors {
   static const power = Color(0xFF6366F1);
   static const heart = Color(0xFFEF4444);
   static const altitude = Color(0xFF64748B);
+  static const cadence = Color(0xFF14B8A6);
 
   static const completed = Color(0xFF16A34A);
   static const strava = Color(0xFFFC4C02);

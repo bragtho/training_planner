@@ -58,7 +58,8 @@ PALETTE = {
                accent="#34d399", on_accent="#052e1f", brand="#0fa968"),
 }
 FONT = 'Roboto, "Segoe UI", sans-serif'
-ICONS = {"search": 0xE567, "fact_check": 0xE256, "library": 0xE377, "settings": 0xE57F, "bike": 0xF6AD, "check": 0xE156}
+CURRENT_DARK = True  # zuletzt gesetztes Farbschema (fuer selbst gezeichnete Elemente)
+ICONS = {"refresh": 0xE514, "add": 0xE047, "search": 0xE567, "fact_check": 0xE256, "library": 0xE377, "settings": 0xE57F, "bike": 0xF6AD, "check": 0xE156}
 
 
 def is_dark(theme: str, app=None) -> bool:
@@ -130,6 +131,7 @@ QPushButton:hover {{ background: {c['container']}; }}
 QPushButton:pressed {{ background: {c['high']}; }}
 QPushButton:disabled {{ color: {c['muted']}; background: {c['container']}; }}
 QPushButton#primary {{ background: {c['accent']}; color: {c['on_accent']}; border: none; }}
+QPushButton#icon {{ padding: 0; min-width: 44px; max-width: 44px; min-height: 44px; max-height: 44px; }}
 QPushButton#primary:hover {{ background: {c['brand']}; }}
 QPushButton#primary:disabled {{ background: {c['high']}; color: {c['muted']}; }}
 QPushButton#danger {{ color: #ef4444; }}
@@ -147,10 +149,33 @@ QScrollBar::handle:vertical:hover {{ background: {c['muted']}; }}
 QScrollBar:horizontal {{ background: transparent; height: 10px; margin: 2px 4px; }}
 QScrollBar::handle:horizontal {{ background: {c['high']}; border-radius: 4px; min-width: 30px; }}
 QScrollBar::add-line, QScrollBar::sub-line {{ width: 0; height: 0; }}
-QSplitter::handle {{ background: transparent; width: 10px; }}
+QSplitter::handle {{ background: transparent; width: 16px; }}
 QLabel {{ background: transparent; }}
 QLabel#muted {{ color: {c['muted']}; }}
 QLabel#error {{ color: #ef4444; font-weight: 600; }}
+QLabel#h1 {{ font-size: 22px; font-weight: 700; letter-spacing: -0.4px; }}
+QLabel#h2 {{ font-size: 18px; font-weight: 700; }}
+QLabel#h3 {{ font-size: 15px; font-weight: 700; }}
+QLabel#body {{ font-size: 14px; }}
+QLabel#small {{ font-size: 12px; color: {c['muted']}; }}
+QLabel#caption {{ font-size: 12px; font-weight: 600; color: {c['muted']}; }}
+QLabel#overline2 {{ color: {c['accent']}; font-size: 11px; font-weight: 700; letter-spacing: 1px; }}
+QFrame#card {{ background: {c['card']}; border: 1px solid {c['line']}; border-radius: 20px; }}
+QFrame#card QLabel, QFrame#card QCheckBox {{ background: transparent; }}
+QFrame#card QTableWidget {{ background: {c['bg']}; border: 1px solid {c['line']}; border-radius: 12px; padding: 4px; gridline-color: {c['line']}; }}
+QTableWidget::item {{ padding: 6px; }}
+QTableWidget QComboBox, QTableWidget QLineEdit {{ padding: 2px 8px; border-radius: 6px; min-height: 0; margin: 4px; }}
+QTableWidget::item:selected {{ background: {tint}; color: {c['text']}; }}
+QWidget#plain {{ background: transparent; }}
+QWidget#segmented {{ background: {c['container']}; border: 1px solid {c['line']}; border-radius: 12px; }}
+QPushButton#seg {{ background: transparent; border: none; border-radius: 9px; padding: 7px 12px; color: {c['muted']}; font-weight: 600; }}
+QPushButton#seg:hover {{ color: {c['text']}; }}
+QPushButton#seg:checked {{ background: {c['card']}; color: {c['accent']}; font-weight: 700; }}
+QScrollArea#detail, QWidget#detailInner {{ background: transparent; border: none; }}
+QListWidget#cards {{ background: transparent; border: none; padding: 0; }}
+QListWidget#cards::item, QListWidget#cards::item:hover, QListWidget#cards::item:selected {{ background: transparent; padding: 0; margin: 0; }}
+QPlainTextEdit#log {{ background: {c['card']}; border: 1px solid {c['line']}; border-radius: 16px; padding: 12px 14px;
+  font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; color: {c['muted']}; }}
 QToolTip {{ background: {c['card']}; color: {c['text']}; border: 1px solid {c['line']}; border-radius: 8px; padding: 6px; }}
 """
 
@@ -158,6 +183,9 @@ QToolTip {{ background: {c['card']}; color: {c['text']}; border: 1px solid {c['l
 def apply_theme(app, dark: bool) -> None:
     """Schriften laden, Stylesheet und Linkfarbe (Palette) wie in der App setzen."""
     from pathlib import Path
+
+    global CURRENT_DARK
+    CURRENT_DARK = dark
 
     from PyQt6.QtGui import QColor, QFontDatabase, QPalette
 

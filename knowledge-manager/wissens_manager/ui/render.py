@@ -51,7 +51,15 @@ def quote_summary(checks: dict) -> tuple[bool | None, str]:
     return False, f"{len(missing)} von {len(qs)} Belegzitaten stehen NICHT im Abstract"
 
 
-def candidate_title(c: dict) -> str:
+def found_on(c: dict) -> str:
+    """Funddatum (TT.MM.) aus created_at, leer wenn unbekannt."""
+    raw = str(c.get("created_at") or "")
+    if len(raw) >= 10 and raw[4] == "-" and raw[7] == "-":
+        return f"{raw[8:10]}.{raw[5:7]}."
+    return ""
+
+
+def candidate_title(c: dict, new: bool = False) -> str:
     a = c.get("analysis") or {}
     ai = a.get("ai") or {}
     paper = a.get("paper") or {}
@@ -61,8 +69,12 @@ def candidate_title(c: dict) -> str:
         flags += " ⚠ zurückgezogen"
     elif (chk.get("cross_check") or {}).get("verdict") == "issues" or quote_summary(chk)[0] is False:
         flags += " ⚠ prüfen"
-    return (f"{c['title']}\n{topics.topic_label(c['topic'])} · {paper.get('year') or '?'} · "
-            f"{ACTION_LABELS.get(ai.get('suggested_action'), '—')}{flags}")
+    when = found_on(c)
+    meta = " · ".join(x for x in (topics.topic_label(c["topic"]), str(paper.get("year") or "?"),
+                                  ACTION_LABELS.get(ai.get("suggested_action"), "—")) if x)
+    if new:
+        return f"NEU · {c['title']}\n{meta}{flags}"
+    return f"{c['title']}\n{meta}{flags}" + (f" · gefunden {when}" if when else "")
 
 
 def candidate_html(c: dict) -> str:

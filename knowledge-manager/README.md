@@ -10,6 +10,14 @@ Desktop-Programm für die Wissensbasis des Coaches: Recherche starten, Ergebniss
 3. Programm starten (`python -m wissens_manager` im Entwicklungs-venv oder `Wissens-Manager.exe`), unter
    Datei → Einstellungen Backend-Adresse und Schlüssel eintragen, „Verbindungen testen“.
 
+## Recherche per Freitext
+
+Im Bereich „Recherche“ beschreibst Du in eigenen Worten, wonach gesucht werden soll, z. B. „Finde Studien zum Thema
+Makrozyklen im Radsport“. Die KI übersetzt die Frage in bis zu drei Europe-PMC-Suchanfragen (erste eng, weitere weiter),
+das Programm prüft sie (ausgewogene Klammern, keine Filterfelder) und sucht damit. Jede gefundene Studie ordnet die KI
+selbst einem Thema zu. „Vorschlag einfügen“ setzt einen Beispielsatz zu den bekannten Themen ein. Unter „Erweitert“
+kannst Du eine fertige Suchanfrage angeben, dann entfällt die Übersetzung. Das Protokoll zeigt den Suchplan.
+
 ## Entwickeln
 
 ```

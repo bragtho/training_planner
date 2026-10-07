@@ -9,11 +9,12 @@ from __future__ import annotations
 from typing import Callable
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDialog, QFormLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel,
+from PyQt6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDialog, QFormLayout, QGridLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel,
                              QLineEdit, QPlainTextEdit, QPushButton, QScrollArea, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 from .. import topics, verify
 from .render import CARD_STATUS_LABELS, DESIGN_LABELS, DIRECTNESS_LABELS, EVIDENCE_LABELS
+from .widgets import Card, DialogFrame, labeled, plain
 
 POPULATIONS = [("elite", "Elite"), ("trained", "Trainierte"), ("recreational", "Freizeit")]
 SEXES = [("all", "alle Geschlechter"), ("female", "Frauen"), ("male", "Männer")]
@@ -47,14 +48,9 @@ class CardEditorDialog(QDialog):
             self._flags[(s.get("doi") or "").lower() or s.get("key", "")] = f
             self._flags[s.get("key", "")] = f
 
-        outer = QVBoxLayout(self)
-        outer.addWidget(QLabel(f"<h3>{heading}</h3>"))
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        body = QWidget()
-        scroll.setWidget(body)
-        outer.addWidget(scroll, 1)
-        lay = QVBoxLayout(body)
+        self.resize(1100, 900)
+        frame = DialogFrame(self, heading.split(": ", 1)[0], heading.split(": ", 1)[1] if ": " in heading else None)
+        add = frame.add
 
         # --- Grunddaten
         self.slug = QLineEdit(card.get("slug", ""))
@@ -64,33 +60,40 @@ class CardEditorDialog(QDialog):
         self.status = _combo([(k, CARD_STATUS_LABELS[k]) for k in ("active", "contested", "watch")], card.get("status", "active"))
         self.evidence = _combo(list(EVIDENCE_LABELS.items()), card.get("evidence", "C"))
         self.directness = _combo(list(DIRECTNESS_LABELS.items()), card.get("directness", "indirect"))
-        self.safety = QCheckBox("Sicherheitsrelevant (Energiemangel, Ernährung, Zyklus ...): braucht Stufe A mit Konsens-Statement")
+        self.safety = QCheckBox("Sicherheitsrelevant (Energiemangel, Ernährung, Zyklus …): braucht Stufe A mit Konsens-Statement")
         self.safety.setChecked(bool(card.get("safety")))
         self.tags = QLineEdit(", ".join(card.get("tags") or []))
-        form = QFormLayout()
-        form.addRow("Schlüssel (Slug)", self.slug)
-        form.addRow("Titel", self.title)
-        form.addRow("Thema", self.topic)
-        form.addRow("Status", self.status)
-        form.addRow("Evidenzstufe", self.evidence)
-        form.addRow("Direktheit", self.directness)
-        form.addRow("", self.safety)
-        form.addRow("Stichwörter", self.tags)
-        lay.addLayout(form)
+        self.tags.setPlaceholderText("Komma-getrennt, z. B. vo2max, hiit")
+        base = Card("Grunddaten", spacing=14)
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(16)
+        grid.setVerticalSpacing(14)
+        grid.addWidget(labeled("Titel", self.title), 0, 0, 1, 2)
+        grid.addWidget(labeled("Schlüssel (Slug)", self.slug), 1, 0)
+        grid.addWidget(labeled("Stichwörter", self.tags), 1, 1)
+        grid.addWidget(labeled("Thema", self.topic), 2, 0)
+        grid.addWidget(labeled("Status", self.status), 2, 1)
+        grid.addWidget(labeled("Evidenzstufe", self.evidence), 3, 0)
+        grid.addWidget(labeled("Direktheit", self.directness), 3, 1)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
+        base.body.addLayout(grid)
+        base.add(self.safety)
         self.cap_hint = QLabel()
-        self.cap_hint.setObjectName("muted")
+        self.cap_hint.setObjectName("small")
         self.cap_hint.setWordWrap(True)
-        lay.addWidget(self.cap_hint)
+        base.add(self.cap_hint)
+        add(base)
 
         # --- Texte
-        self.summary = self._text(card.get("summary", ""), 70)
-        self.recommendation = self._text(card.get("recommendation", ""), 90)
-        self.caveats = self._text(card.get("caveats") or "", 70)
-        texts = QFormLayout()
-        texts.addRow("Kurz gesagt (≤ 400 Zeichen)", self.summary)
-        texts.addRow("Empfehlung: „Wenn …, dann …“ (≤ 800)", self.recommendation)
-        texts.addRow("Grenzen (≤ 800)", self.caveats)
-        lay.addLayout(texts)
+        self.summary = self._text(card.get("summary", ""), 76)
+        self.recommendation = self._text(card.get("recommendation", ""), 100)
+        self.caveats = self._text(card.get("caveats") or "", 76)
+        texts = Card("Inhalt", "Was der Coach liest: kurze Einordnung, bedingte Empfehlung und Grenzen.", spacing=14)
+        texts.add(labeled("Kurz gesagt (höchstens 400 Zeichen)", self.summary))
+        texts.add(labeled("Empfehlung als „Wenn …, dann …“ (höchstens 800 Zeichen)", self.recommendation))
+        texts.add(labeled("Grenzen (höchstens 800 Zeichen)", self.caveats))
+        add(texts)
 
         # --- Gilt fuer
         ap = card.get("applies_to") or {}
@@ -100,71 +103,81 @@ class CardEditorDialog(QDialog):
         self.sex = _combo(SEXES, ap.get("sex", "all"))
         self.age = QLineEdit(ap.get("age") or "")
         self.age.setPlaceholderText("z. B. 18-45")
-        row = QHBoxLayout()
+        pops_row = QHBoxLayout()
+        pops_row.setSpacing(18)
         for box in self.pops.values():
-            row.addWidget(box)
-        row.addWidget(self.sex)
-        row.addWidget(self.age)
-        group = QGroupBox("Gilt für (Population der Studien)")
-        group.setLayout(row)
-        lay.addWidget(group)
+            pops_row.addWidget(box)
+        pops_row.addStretch(1)
+        pops_w = plain(QWidget())
+        pops_w.setLayout(pops_row)
+        applies = Card("Gilt für", "Population der Studien, auf die sich die Karte stützt.", spacing=14)
+        arow = QHBoxLayout()
+        arow.setSpacing(16)
+        arow.addWidget(labeled("Leistungsniveau", pops_w), 2)
+        arow.addWidget(labeled("Geschlecht", self.sex), 1)
+        arow.addWidget(labeled("Alter", self.age), 1)
+        applies.body.addLayout(arow)
+        add(applies)
 
         # --- Quellen
         self.sources_table = QTableWidget(0, len(SOURCE_COLS))
         self.sources_table.setHorizontalHeaderLabels(SOURCE_COLS)
         self.sources_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        self.sources_table.setMinimumHeight(130)
+        self.sources_table.setMinimumHeight(140)
+        for col, width in enumerate((130, 170, 70, 280, 170, 180, 100, 180, 60, 190, 200)):
+            self.sources_table.setColumnWidth(col, width)
         for s in sources:
             self._add_source(s)
         self.sources_table.cellChanged.connect(lambda *_: self._sources_changed())
-        lay.addWidget(self._with_buttons("Quellen (Basis „Volltext selbst gelesen“ nur anhaken, wenn Du den Volltext geprüft hast)",
-                                         self.sources_table, self._add_empty_source))
+        add(self._with_buttons("Quellen", self.sources_table, self._add_empty_source,
+                               "Basis „Volltext selbst gelesen“ nur wählen, wenn Du den Volltext geprüft hast."))
 
         # --- Belegte Aussagen
         self.claims_table = QTableWidget(0, 4)
         self.claims_table.setHorizontalHeaderLabels(["Aussage (eigene Worte)", "Belegzitat (wörtlich, ≤ 25 Wörter)", "Quelle", "Prüfung"])
         self.claims_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.claims_table.setMinimumHeight(150)
+        self.claims_table.setMinimumHeight(160)
+        self.claims_table.setWordWrap(True)
         for c in card.get("claims") or []:
             self._add_claim(c.get("text", ""), c.get("quote", ""), c.get("source_key", ""))
         self.claims_table.cellChanged.connect(lambda *_: self._refresh_checks())
-        lay.addWidget(self._with_buttons("Belegte Aussagen (jede braucht ein wörtliches Zitat und eine Quelle)", self.claims_table,
-                                         lambda: self._add_claim()))
+        add(self._with_buttons("Belegte Aussagen", self.claims_table, lambda: self._add_claim(),
+                               "Jede Aussage braucht ein wörtliches Zitat aus der Quelle und den Quellenschlüssel."))
 
         # --- Positionen (umstritten)
         self.positions_table = QTableWidget(0, 3)
         self.positions_table.setHorizontalHeaderLabels(["Position", "Kurzbeschreibung", "Quellenschlüssel (Komma)"])
         self.positions_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.positions_table.setMinimumHeight(100)
+        self.positions_table.setMinimumHeight(110)
         for p in card.get("positions") or []:
             self._add_position(p.get("label", ""), p.get("summary", ""), ", ".join(p.get("source_keys") or []))
-        self.positions_box = self._with_buttons("Positionen (nur bei Status „Umstritten“: mindestens zwei Lager mit Quellen)",
-                                                self.positions_table, lambda: self._add_position())
-        lay.addWidget(self.positions_box)
+        self.positions_box = self._with_buttons("Positionen", self.positions_table, lambda: self._add_position(),
+                                                "Nur bei Status „Umstritten“: mindestens zwei Lager mit Quellen.")
+        add(self.positions_box)
         self.status.currentIndexChanged.connect(self._status_changed)
 
-        # --- Notiz, Review, Fehler, Knoepfe
+        # --- Abschluss: Notiz, Review
         self.note = QLineEdit()
-        self.note.setPlaceholderText("Notiz zur Entscheidung oder Änderung (erscheint im Verlauf)")
-        lay.addWidget(self.note)
+        self.note.setPlaceholderText("Erscheint im Verlauf der Karte")
         self.review = QCheckBox("Als heute geprüft markieren (nächste Überprüfung in 12 Monaten)")
         self.review.setChecked(True)
         self.review.setVisible(existing)
-        lay.addWidget(self.review)
+        end = Card("Abschluss", spacing=14)
+        end.add(labeled("Notiz zur Entscheidung oder Änderung", self.note))
+        end.add(self.review)
+        add(end)
+
         self.error = QLabel("")
         self.error.setObjectName("error")
         self.error.setWordWrap(True)
-        outer.addWidget(self.error)
-        buttons = QHBoxLayout()
         save = QPushButton("Speichern")
         save.setObjectName("primary")
         cancel = QPushButton("Abbrechen")
         save.clicked.connect(self._save)
         cancel.clicked.connect(self.reject)
-        buttons.addStretch()
-        buttons.addWidget(cancel)
-        buttons.addWidget(save)
-        outer.addLayout(buttons)
+        frame.footer.addWidget(self.error, 1)
+        frame.footer.addWidget(cancel)
+        frame.footer.addWidget(save)
         self._status_changed()
         self._sources_changed()
 
@@ -176,11 +189,11 @@ class CardEditorDialog(QDialog):
         box.setFixedHeight(height)
         return box
 
-    def _with_buttons(self, title: str, table: QTableWidget, add: Callable[[], None]) -> QGroupBox:
-        box = QGroupBox(title)
-        v = QVBoxLayout(box)
-        v.addWidget(table)
+    def _with_buttons(self, title: str, table: QTableWidget, add: Callable[[], None], subtitle: str | None = None) -> Card:
+        box = Card(title, subtitle, spacing=12)
+        box.add(table)
         row = QHBoxLayout()
+        row.setSpacing(10)
         plus = QPushButton("Zeile hinzufügen")
         minus = QPushButton("Markierte Zeile entfernen")
         plus.clicked.connect(add)
@@ -188,8 +201,10 @@ class CardEditorDialog(QDialog):
         row.addWidget(plus)
         row.addWidget(minus)
         row.addStretch()
-        v.addLayout(row)
+        box.body.addLayout(row)
         table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        table.verticalHeader().setVisible(False)
+        table.verticalHeader().setDefaultSectionSize(44)
         return box
 
     def _remove_row(self, table: QTableWidget) -> None:

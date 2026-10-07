@@ -332,3 +332,102 @@ def test_config_roundtrip_clamp_and_broken_file(tmp_path):
     assert config.load_config(path).parallel == 2  # kaputte Datei: Standardwerte
     path.write_text(json.dumps({"model": "opus", "unbekannt": 1}), encoding="utf-8")
     assert config.load_config(path).model == "opus"
+
+
+# ------------------------------------------------------- Recherche per Freitext ---
+
+
+def test_plan_search_validates_and_normalizes_ai_queries():
+    class Plan:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def run_json(self, system, prompt, schema):
+            self.prompt = prompt
+            return self.payload
+
+    good = {"queries": ['TITLE_ABS:("macrocycle" OR periodization) AND TITLE_ABS:(cycling)', "  ", 'unbalanced (paren',
+                        'TITLE_ABS:(x) AND PUB_TYPE:"Review"', 'TITLE_ABS:("odd quote) AND y', 'TITLE_ABS:(training block) AND TITLE_ABS:(cyclists)'],
+            "topic": "periodisierung", "label": "Makrozyklen " * 10, "note": "Sucht Makrozyklen."}
+    adapter = Plan(good)
+    plan = ai.plan_search(adapter, "Finde Studien zum Thema Makrozyklen im Radsport")
+    assert "Makrozyklen im Radsport" in adapter.prompt
+    assert plan["queries"] == ['TITLE_ABS:("macrocycle" OR periodization) AND TITLE_ABS:(cycling)',
+                               "TITLE_ABS:(training block) AND TITLE_ABS:(cyclists)"]  # leere, unausgewogene und Filterfelder fallen weg
+    assert plan["topic"] == "periodisierung" and len(plan["label"]) <= 40
+    assert ai.plan_search(Plan({**good, "topic": "erfunden"}), "x")["topic"] == "sonstiges"
+    with pytest.raises(ai.AiError, match="brauchbare Suchanfrage"):
+        ai.plan_search(Plan({"queries": ["(", '"'], "topic": "kraft", "label": "", "note": ""}), "x")
+    with pytest.raises(ai.AiError, match="beschreibe"):
+        ai.plan_search(Plan(good), "   ")
+    assert ai.valid_query('TITLE_ABS:("a b" OR c)') and not ai.valid_query("x" * 601) and not ai.valid_query("SRC:PPR")
+
+
+def test_pipeline_with_free_text_plans_queries_merges_results_and_assigns_topics():
+    from wissens_manager import pipeline as pl
+
+    fake = FakeAi(relevant={2: {"topic": "kraft"}})
+    fake.plan = {"queries": ['TITLE_ABS:("macrocycle") AND TITLE_ABS:(cycling)', 'TITLE_ABS:(periodization) AND TITLE_ABS:(cyclists)'],
+                 "topic": "periodisierung", "label": "Makrozyklen", "note": "x"}
+    seen_queries = []
+    backend = FakeBackend(cards=[{"slug": "kraft-1", "title": "Kraft", "evidence": "B", "topic": "kraft", "status": "active"},
+                                 {"slug": "alt", "title": "Alt", "evidence": "B", "topic": "kraft", "status": "retired"}])
+    epmc = mock_http({"/search": epmc_response([epmc_result(i) for i in range(1, 4)])})
+    orig = epmc._transport.handle_request
+
+    def spy(request):
+        seen_queries.append(str(request.url.params.get("query")))
+        return orig(request)
+
+    epmc._transport.handle_request = spy
+    cr = mock_http({"crossref": {"message": {"title": ["Interval training in cyclists"], "issued": {"date-parts": [[2024]]}}}})
+    events = []
+    opts = pl.ResearchOptions(request="Finde Studien zum Thema Makrozyklen im Radsport", batch_size=3, parallel=1, max_papers=3)
+    s = pl.run_research(opts, backend=backend, ai=fake, epmc_http=epmc, crossref_http=cr,
+                        progress=lambda stage, d, t, m: events.append((stage, m)))
+    assert "Makrozyklen im Radsport" in fake.plan_requests[0]
+    assert s.queries == fake.plan["queries"] and s.label == "Makrozyklen" and s.found == 3
+    # Die erste Anfrage liefert schon 3 Treffer, die zweite wird nicht mehr gebraucht
+    assert len(seen_queries) == 1 and "macrocycle" in seen_queries[0] and 'PUB_TYPE:"Systematic Review"' in seen_queries[0] and "SRC:MED" in seen_queries[0]
+    assert ("planen", "Suchplan „Makrozyklen“: " + " | ".join(fake.plan["queries"])) in events
+    # Thema je Studie von der KI, sonst das Thema des Suchplans; Fragestellung und alle Karten stehen im Bewertungsprompt
+    topics_by_title = {c["title"]: c["topic"] for c in backend.candidates()}
+    assert sorted(topics_by_title.values()) == ["kraft", "periodisierung", "periodisierung"]
+    triage_prompt = next(p for p in fake.prompts if "Bewerte jede der folgenden Studien" in p)
+    assert "Fragestellung: Finde Studien zum Thema Makrozyklen im Radsport" in triage_prompt and "kraft-1 | Kraft" in triage_prompt
+    assert "alt |" not in triage_prompt and "(alle Themen)" in triage_prompt
+
+
+def test_free_text_falls_back_to_second_query_and_raw_query_skips_the_ai():
+    from wissens_manager import pipeline as pl
+
+    fake = FakeAi()
+    fake.plan = {"queries": ["TITLE_ABS:(zero hits)", "TITLE_ABS:(broader)"], "topic": "sonstiges", "label": "L", "note": ""}
+    backend = FakeBackend()
+    epmc = mock_http({"/search": [epmc_response([]), epmc_response([epmc_result(1), epmc_result(2)])]})
+    cr = mock_http({"crossref": {"message": {"title": ["Interval training in cyclists"], "issued": {"date-parts": [[2024]]}}}})
+    s = pl.run_research(pl.ResearchOptions(request="Irgendwas", batch_size=2, parallel=1), backend=backend, ai=fake, epmc_http=epmc, crossref_http=cr)
+    assert s.found == 2 and s.ingested == 2  # erste Anfrage ohne Treffer, zweite liefert
+
+    fake2 = FakeAi()
+    epmc2 = mock_http({"/search": epmc_response([epmc_result(1)])})
+    s2 = pl.run_research(pl.ResearchOptions(free_text='TITLE_ABS:("tapering")', request="egal", batch_size=1, parallel=1),
+                         backend=FakeBackend(), ai=fake2, epmc_http=epmc2, crossref_http=cr)
+    assert not getattr(fake2, "plan_requests", []) and s2.queries == ['TITLE_ABS:("tapering")']  # fertige Anfrage: keine Uebersetzung
+
+
+def test_plan_errors_are_reported_and_no_input_is_rejected():
+    from wissens_manager import pipeline as pl
+
+    class Broken(FakeAi):
+        def run_json(self, system, prompt, schema):
+            raise ai.AiError("Zeitüberschreitung")
+
+    with pytest.raises(ai.AiError):
+        pl.run_research(pl.ResearchOptions(request="Makrozyklen"), backend=FakeBackend(), ai=Broken(), epmc_http=mock_http({"/search": epmc_response([])}))
+    with pytest.raises(ValueError, match="beschreibe"):
+        pl.run_research(pl.ResearchOptions(), backend=FakeBackend(), ai=FakeAi(), epmc_http=mock_http({"/search": epmc_response([])}))
+    # Standardthema (ohne Freitext) funktioniert weiter
+    s = pl.run_research(pl.ResearchOptions(topic="kraft"), backend=FakeBackend(), ai=FakeAi(),
+                        epmc_http=mock_http({"/search": epmc_response([])}))
+    assert s.found == 0 and s.label == "Kraft"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .europepmc import Paper
+from .topics import TOPICS
 
 DESIGNS = ["systematic_review", "meta_analysis", "consensus", "guideline", "rct", "crossover_trial", "cohort",
            "observational", "review", "expert", "other"]
@@ -32,6 +33,7 @@ Empfehlung), irrelevant.
 Einschraenkungen; C fuer Beobachtungsstudien oder kleine Studien; nie D. Das System begrenzt die Stufe zusaetzlich (nur Abstract: hoechstens B).
 - limitations: nenne kleine Stichprobe, kurze Dauer, Heterogenitaet, fehlende Kontrollgruppe, Interessenkonflikte, falsche Population, \
 sofern aus dem Abstract erkennbar.
+- topic: der passendste Themenschluessel fuer diese Studie (Liste im Schema), sonst sonstiges.
 - card_draft nur bei new_card, sonst null. slug: kleinbuchstaben-mit-bindestrichen. summary hoechstens 300 Zeichen. recommendation als \
 bedingte, handlungsnahe Regel ("Wenn ..., dann ...") hoechstens 600 Zeichen und nur mit Aussagen, die der Abstract traegt, ohne erfundene \
 Zahlen. claims: je Aussage text (eigene Worte) und quote (woertlich aus dem Abstract, hoechstens 25 Woerter). Sei kritisch statt gefaellig."""
@@ -55,6 +57,7 @@ TRIAGE_SCHEMA = {
             "sample_n": {"type": ["integer", "null"]}, "summary": _STR, "finding": _STR,
             "quotes": {"type": "array", "items": _STR}, "limitations": _STR,
             "directness": {"type": "string", "enum": DIRECTNESS},
+            "topic": {"type": "string", "enum": list(TOPICS)},
             "suggested_action": {"type": "string", "enum": ACTIONS}, "target_card": _STR_NULL,
             "evidence_suggestion": {"type": "string", "enum": ["A", "B", "C"]},
             "card_draft": {"type": ["object", "null"], "properties": {
@@ -90,11 +93,42 @@ def paper_block(pid: str, p: Paper) -> str:
             f"Titel: {p.title}\nAbstract: {p.abstract}\n")
 
 
-def triage_prompt(topic_label: str, existing: list[dict], papers: dict[str, Paper]) -> str:
+TOPIC_HELP = ", ".join(f"{k} ({v[0]})" for k, v in TOPICS.items())
+
+
+def triage_prompt(topic_label: str, existing: list[dict], papers: dict[str, Paper], scope: str = "zu diesem Thema") -> str:
     cards = "\n".join(f"- {c['slug']} | {c['title']} | Evidenz {c['evidence']}" for c in existing) or "- (noch keine)"
     blocks = "\n".join(paper_block(pid, p) for pid, p in papers.items())
-    return (f"Thema: {topic_label}\n\nVorhandene Wissenskarten zu diesem Thema (Slug | Titel | Evidenz):\n{cards}\n\n"
+    return (f"Fragestellung: {topic_label}\nMoegliche Themenschluessel: {TOPIC_HELP}\n\n"
+            f"Vorhandene Wissenskarten {scope} (Slug | Titel | Evidenz):\n{cards}\n\n"
             f"Bewerte jede der folgenden Studien. Gib je Studie genau ein Ergebnis mit der id aus der eckigen Klammer.\n\n{blocks}")
+
+
+PLAN_SYSTEM = """Du uebersetzt die Forschungsfrage eines Radsport-Trainers in Suchanfragen fuer Europe PMC (englischsprachige \
+medizinische Literaturdatenbank). Regeln:
+- 1 bis 3 Anfragen, die erste eng und praezise, die weiteren etwas weiter (andere Begriffe oder Synonyme), damit auch bei wenigen Treffern \
+etwas Passendes gefunden wird.
+- Jede Anfrage besteht aus Teilen der Form TITLE_ABS:(begriff1 OR "mehrwort begriff" OR begriff3), verbunden mit AND. Englische Fachbegriffe, \
+Synonyme mit OR, Mehrwortbegriffe in Anfuehrungszeichen.
+- Zielgruppe: Sagt der Nutzer nichts anderes, schraenke auf Radsport und Ausdauersport ein, z. B. AND TITLE_ABS:(cycling OR cyclists OR \
+"endurance athletes").
+- Verwende nicht die Felder PUB_TYPE, PUB_YEAR, SRC, DOI, AUTH oder EXT_ID; Studientyp und Jahr setzt das Programm.
+- Hoechstens 400 Zeichen je Anfrage, Klammern und Anfuehrungszeichen muessen ausgewogen sein.
+- topic: der passendste Schluessel der Liste fuer die Fragestellung, sonst sonstiges.
+- label: kurzer deutscher Titel der Fragestellung (hoechstens 40 Zeichen). note: ein Satz auf Deutsch, was gesucht wird."""
+
+PLAN_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "queries": {"type": "array", "items": _STR, "minItems": 1, "maxItems": 3},
+        "topic": {"type": "string", "enum": list(TOPICS)}, "label": _STR, "note": _STR,
+    },
+    "required": ["queries", "topic", "label", "note"],
+}
+
+
+def plan_prompt(request: str) -> str:
+    return f"Suchplan fuer diese Forschungsfrage erstellen.\nMoegliche Themenschluessel: {TOPIC_HELP}\n\nFrage des Nutzers:\n{request.strip()}"
 
 
 def cross_prompt(items: dict[str, tuple[Paper, dict]]) -> str:

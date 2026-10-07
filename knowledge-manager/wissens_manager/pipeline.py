@@ -20,7 +20,11 @@ MAX_CLAIM_WORDS = 25
 
 @dataclass
 class ResearchOptions:
-    topic: str
+    """Was recherchiert wird. Vorrang: free_text (fertige Europe-PMC-Anfrage) vor request (Frage in eigenen Worten, die die KI in
+    Suchanfragen uebersetzt) vor topic (Standardanfrage eines Themas)."""
+
+    topic: str = ""
+    request: str = ""
     free_text: str = ""
     study_types: tuple[str, ...] = topics.DEFAULT_STUDY_TYPES
     year_from: int | None = None
@@ -37,6 +41,9 @@ class RunSummary:
     auto_rejected: int = 0
     ingested: int = 0
     skipped: int = 0
+    queries: list[str] = field(default_factory=list)
+    new_after_id: int = 0  # hoechste Kandidaten-ID vor dem Lauf: alles darueber ist neu
+    label: str = ""
     errors: list[str] = field(default_factory=list)
     ai_calls: int = 0
     cost_usd: float = 0.0
@@ -58,9 +65,10 @@ def _batches(items: list, size: int) -> list[list]:
     return [items[i:i + size] for i in range(0, len(items), size)]
 
 
-def _existing_cards(backend: BackendClient, topic: str) -> list[dict]:
-    return [{"slug": c["slug"], "title": c["title"], "evidence": c["evidence"]}
-            for c in backend.cards() if c["topic"] == topic and c["status"] != "retired"]
+def _existing_cards(backend: BackendClient, topic: str | None) -> list[dict]:
+    """Vorhandene Karten fuers KI-Urteil: eines Themas, oder (topic None) alle aktiven, hoechstens 80."""
+    cards = [c for c in backend.cards() if c["status"] != "retired" and (topic is None or c["topic"] == topic)]
+    return [{"slug": c["slug"], "title": c["title"], "evidence": c["evidence"]} for c in cards[:80]]
 
 
 def build_checks(paper: Paper, ai_result: dict, cross: dict | None, crossref: dict | None) -> dict:
@@ -81,11 +89,16 @@ def build_checks(paper: Paper, ai_result: dict, cross: dict | None, crossref: di
 
 def evaluate(papers: list[Paper], topic: str, *, backend: BackendClient, ai: ai_mod.AiAdapter, batch_size: int = 5, parallel: int = 2,
              crossref_http: httpx.Client | None = None, progress: Progress = lambda *a: None,
-             cancelled: Callable[[], bool] = lambda: False) -> tuple[list[dict], RunSummary]:
-    """Bewertet Studien mit der KI und baut die Kandidaten fuer das Backend (noch nicht gesendet)."""
+             cancelled: Callable[[], bool] = lambda: False, focus: str = "") -> tuple[list[dict], RunSummary]:
+    """Bewertet Studien mit der KI und baut die Kandidaten fuer das Backend (noch nicht gesendet).
+
+    topic ist das Standardthema der Kandidaten (leer: sonstiges); die KI ordnet jede Studie selbst einem Thema zu.
+    focus ist die Fragestellung des Nutzers in eigenen Worten; mit focus sieht die KI alle vorhandenen Karten."""
     summary = RunSummary(found=len(papers))
-    label = topics.topic_label(topic)
-    existing = _existing_cards(backend, topic)
+    topic = topic if topic in topics.TOPICS else "sonstiges"
+    label = focus.strip() or topics.topic_label(topic)
+    existing = _existing_cards(backend, None if focus.strip() else topic)
+    scope = "(alle Themen)" if focus.strip() else "zu diesem Thema"
     taken_keys = {s["key"] for s in backend.sources()}
 
     ids = {f"P{i + 1}": p for i, p in enumerate(papers)}
@@ -94,7 +107,7 @@ def evaluate(papers: list[Paper], topic: str, *, backend: BackendClient, ai: ai_
     limit_hit = False
 
     def run_triage(batch: list[tuple[str, Paper]]) -> dict[str, dict]:
-        return ai_mod.triage(ai, label, existing, dict(batch))
+        return ai_mod.triage(ai, label, existing, dict(batch), scope)
 
     progress("bewerten", 0, len(batches), f"KI bewertet {len(papers)} Studien in {len(batches)} Paketen ...")
     with ThreadPoolExecutor(max_workers=max(1, parallel)) as pool:
@@ -149,7 +162,7 @@ def evaluate(papers: list[Paper], topic: str, *, backend: BackendClient, ai: ai_
                 "retraction_checked": dt.date.today().isoformat() if crossref is not None else None,
             }
         items.append({
-            "doi": paper.doi, "pmid": paper.pmid, "title": paper.title, "topic": topic,
+            "doi": paper.doi, "pmid": paper.pmid, "title": paper.title, "topic": res.get("topic") or topic,
             "analysis": {"paper": paper.to_dict(), "ai": res, "check": checks, "suggested_source": suggested_source,
                          "auto_rejected": res["suggested_action"] == "irrelevant"},
         })
@@ -177,28 +190,56 @@ def send(items: list[dict], backend: BackendClient, summary: RunSummary) -> None
             backend.decide(c["id"], "reject", f"Automatisch: {reason}"[:480])
 
 
+def plan_queries(opts: ResearchOptions, ai: ai_mod.AiAdapter) -> tuple[list[str], str, str, str]:
+    """(Suchanfragen, Thema, Fragestellung, Titel) je nach Eingabe: fertige Anfrage, Frage in eigenen Worten (KI) oder Standardthema."""
+    if opts.free_text.strip():
+        return [opts.free_text.strip()], opts.topic, opts.request.strip(), opts.request.strip()[:40] or "Eigene Suchanfrage"
+    if opts.request.strip():
+        plan = ai_mod.plan_search(ai, opts.request)
+        return plan["queries"], plan["topic"], opts.request.strip(), plan["label"]
+    core = topics.TOPICS.get(opts.topic, ("", ""))[1]
+    if not core:
+        raise ValueError("Bitte beschreibe, wonach gesucht werden soll")
+    return [core], opts.topic, "", topics.topic_label(opts.topic)
+
+
 def run_research(opts: ResearchOptions, *, backend: BackendClient, ai: ai_mod.AiAdapter, epmc_http: httpx.Client | None = None,
                  crossref_http: httpx.Client | None = None, progress: Progress = lambda *a: None,
                  cancelled: Callable[[], bool] = lambda: False) -> RunSummary:
     known = backend.known()
     known_dois, known_pmids = set(known["dois"]), set(known["pmids"])
-    query = topics.build_query(opts.topic, opts.free_text, opts.study_types, opts.year_from)
+    if opts.request.strip() and not opts.free_text.strip():
+        progress("planen", 0, 1, "KI übersetzt Deine Frage in Suchanfragen ...")
+    queries, topic, focus, label = plan_queries(opts, ai)
+    if opts.request.strip() and not opts.free_text.strip():
+        progress("planen", 1, 1, f"Suchplan „{label}“: " + " | ".join(queries))
     progress("suchen", 0, 1, "Suche bei Europe PMC ...")
-    papers = europepmc.search(query, limit=opts.max_papers, http=epmc_http,
-                              skip=lambda p: (p.doi in known_dois) or (p.pmid in known_pmids))
+    papers: list[Paper] = []
+    seen: set[str] = set()
+    for core in queries:
+        if len(papers) >= opts.max_papers or cancelled():
+            break
+        query = topics.build_query("", core, opts.study_types, opts.year_from)
+        found = europepmc.search(query, limit=opts.max_papers - len(papers), http=epmc_http,
+                                 skip=lambda p: (p.doi in known_dois) or (p.pmid in known_pmids)
+                                 or (p.doi or p.pmid or p.title) in seen)
+        for p in found:
+            seen.add(p.doi or p.pmid or p.title)
+        papers.extend(found)
     progress("suchen", 1, 1, f"{len(papers)} neue Studien mit Abstract gefunden")
     if not papers:
-        return RunSummary(found=0)
-    items, summary = evaluate(papers, opts.topic, backend=backend, ai=ai, batch_size=opts.batch_size, parallel=opts.parallel,
-                              crossref_http=crossref_http, progress=progress, cancelled=cancelled)
+        return RunSummary(found=0, queries=queries, label=label, stopped=cancelled())
+    items, summary = evaluate(papers, topic, backend=backend, ai=ai, batch_size=opts.batch_size, parallel=opts.parallel,
+                              crossref_http=crossref_http, progress=progress, cancelled=cancelled, focus=focus)
+    summary.queries, summary.label = queries, label
     progress("senden", 0, 1, "Sende Ergebnisse ans Backend ...")
     send(items, backend, summary)
     progress("senden", 1, 1, summary.text())
     return summary
 
 
-def analyze_identifier(identifier: str, topic: str, *, backend: BackendClient, ai: ai_mod.AiAdapter, epmc_http: httpx.Client | None = None,
-                       crossref_http: httpx.Client | None = None, progress: Progress = lambda *a: None) -> RunSummary:
+def analyze_identifier(identifier: str, topic: str = "", *, backend: BackendClient, ai: ai_mod.AiAdapter, epmc_http: httpx.Client | None = None,
+                       crossref_http: httpx.Client | None = None, progress: Progress = lambda *a: None, focus: str = "") -> RunSummary:
     """Wertet eine einzelne Studie per DOI oder PMID aus (auch wenn sie nicht zu den Standardthemen-Treffern gehoert)."""
     paper = europepmc.fetch(identifier, http=epmc_http)
     if paper is None:
@@ -208,6 +249,7 @@ def analyze_identifier(identifier: str, topic: str, *, backend: BackendClient, a
     known = backend.known()
     if (paper.doi and paper.doi in known["dois"]) or (paper.pmid and paper.pmid in known["pmids"]):
         raise ValueError("Diese Studie ist dem Backend schon bekannt (als Quelle oder Kandidat)")
-    items, summary = evaluate([paper], topic, backend=backend, ai=ai, batch_size=1, parallel=1, crossref_http=crossref_http, progress=progress)
+    items, summary = evaluate([paper], topic, backend=backend, ai=ai, batch_size=1, parallel=1, crossref_http=crossref_http,
+                              progress=progress, focus=focus)
     send(items, backend, summary)
     return summary

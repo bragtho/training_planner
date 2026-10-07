@@ -74,7 +74,7 @@ def window(services, monkeypatch):
 
 
 def run_research(window):
-    window.research.topic.setCurrentIndex(window.research.topic.findData("intervalle"))
+    window.research.request.setPlainText("Finde Studien zum Thema Intervalle im Radsport")
     window.research.start()
     settle(window.research)
     settle(window.results)
@@ -122,7 +122,8 @@ def test_main_window_starts_with_three_areas(window):
 def test_research_flow_fills_results(window, services):
     run_research(window)
     log = window.research.log.toPlainText()
-    assert "Recherche „Intervalle“" in log and "Fertig:" in log and "relevant" in log
+    assert "Recherche: Finde Studien zum Thema Intervalle im Radsport" in log and "Suchplan „Intervalle“" in log
+    assert "Fertig:" in log and "relevant" in log
     assert window.research.start_btn.isEnabled() and not window.research.cancel_btn.isEnabled()
     assert window.tabs.currentWidget() is window.results  # springt zu den Ergebnissen
     assert window.results.list.count() == 2  # Studie 3 wurde als nicht relevant aussortiert
@@ -139,9 +140,9 @@ def test_research_flow_fills_results(window, services):
 def test_research_validates_input(window, monkeypatch):
     shown = []
     monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: shown.append(a[2]))
-    window.research.topic.setCurrentIndex(window.research.topic.findData("sonstiges"))
+    window.research.request.setPlainText("   ")
     window.research.start()
-    assert shown and "Suchanfrage" in shown[0] and not window.research.cancel_btn.isEnabled()
+    assert shown and "wonach gesucht werden soll" in shown[0] and not window.research.cancel_btn.isEnabled()
     monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: shown.append(a[2]))
     window.research.analyze_one()
     assert "DOI oder PMID" in shown[-1]
@@ -302,3 +303,105 @@ def test_screenshots_of_all_areas(window, services, tmp_path):
         window.tabs.setCurrentIndex(i)
         app.processEvents()
         assert window.grab().save(os.path.join(out, f"{name}.png"))
+
+
+def test_preset_inserts_a_sentence_and_raw_query_replaces_the_ai_translation(window, monkeypatch):
+    r = window.research
+    idx = r.preset.findData("Kraft")
+    r._insert_preset(idx)
+    assert r.request.toPlainText() == "Finde Studien zum Thema Kraft im Radsport" and r.preset.currentIndex() == 0
+    r._insert_preset(0)  # Platzhalter fuegt nichts ein
+    assert r.request.toPlainText() == "Finde Studien zum Thema Kraft im Radsport"
+    r.request.clear()
+    r.query.setText('TITLE_ABS:("heat acclimation") AND TITLE_ABS:(cyclists)')
+    r.start()  # nur erweiterte Anfrage: erlaubt, keine Uebersetzung durch die KI
+    settle(r)
+    assert "Recherche: TITLE_ABS" in r.log.toPlainText() and "Suchplan" not in r.log.toPlainText()
+
+
+def test_results_mark_new_studies_of_the_last_run_and_filter_old_ones(window, services):
+    # Zwei alte offene Studien liegen schon im Backend
+    services.backend.ingest([{"doi": "10.1/old1", "pmid": "9001", "title": "Alte Studie eins", "topic": "kraft", "analysis": {
+        "paper": {"year": 2020}, "ai": {"suggested_action": "new_card"}, "check": {}}},
+        {"doi": "10.1/old2", "pmid": "9002", "title": "Alte Studie zwei", "topic": "hitze", "analysis": {
+            "paper": {"year": 2021}, "ai": {"suggested_action": "watch"}, "check": {}}}])
+    run_research(window)
+    res = window.results
+    assert res.new_after_id == 2 and res.scope.currentData() == "new"  # springt auf die neuen
+    assert res.list.count() == 2 and all(res.list.item(i).text().startswith("NEU") for i in range(2))
+    assert window.cfg.new_after_id == 2
+
+    res.scope.setCurrentIndex(res.scope.findData("all"))
+    settle(res)
+    assert res.list.count() == 4 and "2 neu" in res.count.text()
+    texts = [res.list.item(i).text() for i in range(4)]
+    assert [t.startswith("NEU") for t in texts] == [True, True, False, False]  # neue zuerst
+    assert "Alte Studie zwei" in texts[2] and "gefunden 07.10." in texts[2]  # alte mit Funddatum
+
+    res.scope.setCurrentIndex(res.scope.findData("old"))
+    settle(res)
+    assert res.list.count() == 2 and all("NEU" not in res.list.item(i).text() for i in range(2))
+    assert not res.is_new(res.items[0]) or res.items[0]["id"] > 2
+    # nach Neustart des Programms bleibt die Markierung (aus der Konfiguration)
+    from wissens_manager.ui.main_window import MainWindow
+
+    w2 = MainWindow(window.cfg, services, check_connections=False)
+    assert w2.results.new_after_id == 2
+    w2.close()
+
+
+def test_widgets_wrap_titles_segmented_api_and_detail_text():
+    from PyQt6.QtGui import QFont, QFontMetrics
+
+    from wissens_manager.ui import widgets as W
+
+    f = QFont()
+    f.setPixelSize(14)
+    long = "Effects of Post-Exercise Heat Exposure on Acute Recovery and Training-Induced Performance Adaptations: A Systematic Review"
+    lines = W.ListCardDelegate._lines(long, f, 220, 3)
+    fm = QFontMetrics(f)
+    assert len(lines) == 3 and lines[-1].endswith("…") and all(fm.horizontalAdvance(x) <= 220 for x in lines)
+    assert W.ListCardDelegate._lines("kurz", f, 220, 3) == ["kurz"]
+    assert len(W.ListCardDelegate._lines("x" * 200, f, 100, 5)) == 5  # ueberlange Woerter werden zerteilt
+
+    seg = W.Segmented([("Offen", "pending"), ("Verworfen", "rejected")])
+    seen = []
+    seg.currentIndexChanged.connect(seen.append)
+    assert seg.currentData() == "pending" and seg.findData("rejected") == 1 and seg.findData("x") == -1 and seg.count() == 2
+    seg.setCurrentIndex(1)
+    assert seg.currentData() == "rejected" and seen == [1]
+
+    dv = W.DetailView()
+    card = W.Card("Titel", "Untertitel")
+    card.add(W.label("Inhalt"))
+    dv.set_widgets([card, W.pill_row([("NEU", W.GREEN)])])
+    assert "Titel" in dv.toPlainText() and "Inhalt" in dv.toPlainText() and "NEU" in dv.toPlainText()
+    dv.show_message("Nichts da")
+    app.processEvents()
+    assert "Nichts da" in dv.toPlainText()
+
+
+def test_detail_views_show_checks_issues_and_card_sections(window, services):
+    run_research(window)
+    res = window.results
+    text = res.detail.toPlainText()
+    assert "Vorschlag der KI" in text and "Prüfungen" in text and "Belegzitate" in text and "Abstract" in text and "NEU" in text
+    from wissens_manager.ui.detail import card_widgets, candidate_widgets
+
+    c = dict(res.items[0])
+    c["analysis"] = {**c["analysis"], "check": {**c["analysis"]["check"], "cross_check": {"verdict": "issues", "issues": ["Zahl falsch"]}}}
+    dv = __import__("wissens_manager.ui.widgets", fromlist=["DetailView"]).DetailView()
+    dv.set_widgets(candidate_widgets(c))
+    assert "Abweichungen laut Gegenprüfung" in dv.toPlainText() and "Zahl falsch" in dv.toPlainText()
+    card = {"slug": "s", "title": "Karte", "topic_label": "Intervalle", "evidence": "B", "directness": "direct", "status": "contested",
+            "safety": True, "review_overdue": True, "review_due": "2026-01-01", "recommendation": "Wenn X, dann Y.", "summary": "S",
+            "applies_to": {"population": ["elite"], "sex": "female", "age": "18-35"}, "caveats": "Klein",
+            "positions": [{"label": "Lager A", "summary": "a", "source_keys": ["k"]}],
+            "claims": [{"text": "T", "quote": "Q", "citation": "Seiler 2010"}],
+            "sources": [{"citation": "Seiler 2010", "title": "Titel", "design_label": "RCT", "basis": "abstract", "url": "https://x", "doi": "10.1/x"}],
+            "version": 2, "reviewed": "2025-01-01"}
+    dv.set_widgets(card_widgets(card))
+    t = dv.toPlainText()
+    for part in ("Evidenz B", "sicherheitsrelevant", "Überprüfung fällig", "Empfehlung", "Wenn X, dann Y.", "Elite", "Frauen", "Alter 18-35",
+                 "Position: Lager A", "Belegte Aussagen", "Seiler 2010", "nur Abstract", "Version 2"):
+        assert part in t, part

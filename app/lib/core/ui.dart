@@ -10,20 +10,22 @@ class PageBody extends StatelessWidget {
     required this.children,
     this.maxWidth = 1100,
     this.onRefresh,
-    this.padding = const EdgeInsets.fromLTRB(Gap.lg, Gap.sm, Gap.lg, Gap.xxl),
+    this.padding,
   });
   final List<Widget> children;
   final double maxWidth;
   final Future<void> Function()? onRefresh;
-  final EdgeInsets padding;
+  final EdgeInsets? padding;
 
   @override
   Widget build(BuildContext context) {
+    final narrow = MediaQuery.sizeOf(context).width < compactWidth;
+    final pad = padding ?? EdgeInsets.fromLTRB(narrow ? Gap.md : Gap.lg, Gap.sm, narrow ? Gap.md : Gap.lg, Gap.xxl);
     final list = Align(
       alignment: Alignment.topCenter,
       child: ConstrainedBox(
         constraints: BoxConstraints(maxWidth: maxWidth),
-        child: ListView(physics: const AlwaysScrollableScrollPhysics(), padding: padding, children: children),
+        child: ListView(physics: const AlwaysScrollableScrollPhysics(), padding: pad, children: children),
       ),
     );
     return SafeArea(
@@ -43,8 +45,9 @@ class PageHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context);
+    final narrow = MediaQuery.sizeOf(context).width < compactWidth;
     return Padding(
-      padding: const EdgeInsets.only(top: Gap.lg, bottom: Gap.xl),
+      padding: narrow ? const EdgeInsets.only(top: Gap.md, bottom: Gap.lg) : const EdgeInsets.only(top: Gap.lg, bottom: Gap.xl),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
@@ -66,8 +69,8 @@ class PageHeader extends StatelessWidget {
                   title,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: MediaQuery.sizeOf(context).width < 600
-                      ? t.textTheme.headlineSmall
+                  style: narrow
+                      ? t.textTheme.titleLarge?.copyWith(fontSize: 22)
                       : t.textTheme.headlineMedium,
                 ),
               ],
@@ -115,12 +118,12 @@ class SurfaceCard extends StatelessWidget {
   const SurfaceCard({
     super.key,
     required this.child,
-    this.padding = const EdgeInsets.all(Gap.lg),
+    this.padding,
     this.onTap,
     this.color,
   });
   final Widget child;
-  final EdgeInsets padding;
+  final EdgeInsets? padding;
   final VoidCallback? onTap;
   final Color? color;
 
@@ -130,7 +133,10 @@ class SurfaceCard extends StatelessWidget {
     clipBehavior: Clip.antiAlias,
     child: InkWell(
       onTap: onTap,
-      child: Padding(padding: padding, child: child),
+      child: Padding(
+        padding: padding ?? EdgeInsets.all(MediaQuery.sizeOf(context).width < compactWidth ? Gap.md : Gap.lg),
+        child: child,
+      ),
     ),
   );
 }
@@ -168,7 +174,8 @@ class MetricTile extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, box) {
         final tight = box.maxWidth < 150;
-        final compact = this.compact || tight;
+        final phone = MediaQuery.sizeOf(context).width < compactWidth;
+        final compact = this.compact || tight || phone;
         return SurfaceCard(
           padding: EdgeInsets.all(compact ? Gap.md : Gap.lg),
           child: Column(
@@ -179,12 +186,12 @@ class MetricTile extends StatelessWidget {
                 children: [
                   if (icon != null && !tight) ...[
                     Container(
-                      padding: const EdgeInsets.all(6),
+                      padding: EdgeInsets.all(phone ? 5 : 6),
                       decoration: BoxDecoration(
                         color: c.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(Radii.sm),
                       ),
-                      child: Icon(icon, size: 16, color: c),
+                      child: Icon(icon, size: phone ? 14 : 16, color: c),
                     ),
                     const SizedBox(width: Gap.sm),
                   ],

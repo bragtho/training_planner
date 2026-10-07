@@ -342,7 +342,6 @@ class RideDetails extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final t = Theme.of(context);
     final m = metrics;
     final tiles = <Widget>[
       if (m['vi'] != null)
@@ -398,30 +397,10 @@ class RideDetails extends StatelessWidget {
             color: AppColors.completed,
             help: 'Efficiency Factor = NP ÷ Ø Puls. Steigt er bei gleichen Fahrten, verbessert sich die Grundlage.'),
     ];
-    final best = Json.from((m['best_powers'] ?? const {}) as Map);
-    final pbKeys = {for (final b in bests) (b as Map)['duration']};
     return SurfaceCard(
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         const SectionHeader(title: 'Analyse', subtitle: 'Kennzahlen aus den Sensordaten'),
         if (tiles.isNotEmpty) ResponsiveGrid(minItemWidth: 140, children: tiles),
-        if (best.isNotEmpty) ...[
-          const SizedBox(height: Gap.lg),
-          Text('Beste Leistungen dieser Fahrt', style: t.textTheme.titleSmall),
-          const SizedBox(height: Gap.sm),
-          Wrap(spacing: Gap.sm, runSpacing: Gap.sm, children: [
-            for (final e in best.entries)
-              Pill(
-                label: '${e.key}  ${e.value} W',
-                color: pbKeys.contains(e.key) ? const Color(0xFFF59E0B) : t.colorScheme.onSurfaceVariant,
-                icon: pbKeys.contains(e.key) ? Icons.emoji_events_rounded : null,
-              ),
-          ]),
-          if (pbKeys.isNotEmpty) ...[
-            const SizedBox(height: Gap.sm),
-            Text('Pokal: neuer Bestwert gegenüber den 90 Tagen davor.',
-                style: t.textTheme.bodySmall?.copyWith(color: t.colorScheme.onSurfaceVariant)),
-          ],
-        ],
       ]),
     );
   }

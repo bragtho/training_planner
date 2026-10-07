@@ -83,43 +83,71 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
       body: SafeArea(
         bottom: false,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: Gap.lg),
+          padding: EdgeInsets.symmetric(horizontal: MediaQuery.sizeOf(context).width < compactWidth ? Gap.md : Gap.lg),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              PageHeader(
-                subtitle: 'Kalender',
-                title: DateFormat('MMMM yyyy', 'de').format(_month),
-                trailing: [
-                  if (data.isLoading)
-                    const Padding(
-                      padding: EdgeInsets.only(right: Gap.md, bottom: Gap.md),
-                      child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
-                    ),
-                  OutlinedButton.icon(
-                    onPressed: () => context.push('/season'),
-                    icon: const Icon(Icons.timeline_rounded, size: 18),
-                    label: Text(MediaQuery.sizeOf(context).width < 600 ? 'Saison' : 'Saisonplan'),
+              Builder(builder: (context) {
+                final phone = MediaQuery.sizeOf(context).width < compactWidth;
+                final loading = data.isLoading
+                    ? const Padding(
+                        padding: EdgeInsets.only(right: Gap.md),
+                        child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                      )
+                    : null;
+                final season = OutlinedButton.icon(
+                  onPressed: () => context.push('/season'),
+                  icon: const Icon(Icons.timeline_rounded, size: 18),
+                  label: Text(phone ? 'Saison' : 'Saisonplan'),
+                );
+                final prev = IconButton.outlined(
+                  tooltip: 'Voriger Monat',
+                  onPressed: () => _shift(-1),
+                  icon: const Icon(Icons.chevron_left_rounded),
+                );
+                final today = OutlinedButton(
+                  onPressed: isCurrent ? null : () => setState(() => _month = DateTime(now.year, now.month)),
+                  child: const Text('Heute'),
+                );
+                final next = IconButton.outlined(
+                  tooltip: 'Nächster Monat',
+                  onPressed: () => _shift(1),
+                  icon: const Icon(Icons.chevron_right_rounded),
+                );
+                final title = DateFormat('MMMM yyyy', 'de').format(_month);
+                if (!phone) {
+                  return PageHeader(
+                    subtitle: 'Kalender',
+                    title: title,
+                    trailing: [
+                      ?loading,
+                      season,
+                      const SizedBox(width: Gap.sm),
+                      prev,
+                      const SizedBox(width: Gap.xs),
+                      today,
+                      const SizedBox(width: Gap.xs),
+                      next,
+                    ],
+                  );
+                }
+                // Handy: Monat in einer Zeile, Bedienelemente darunter
+                return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  PageHeader(subtitle: 'Kalender', title: title, trailing: [?loading]),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: Gap.md),
+                    child: Row(children: [
+                      season,
+                      const Spacer(),
+                      prev,
+                      const SizedBox(width: Gap.xs),
+                      today,
+                      const SizedBox(width: Gap.xs),
+                      next,
+                    ]),
                   ),
-                  const SizedBox(width: Gap.sm),
-                  IconButton.outlined(
-                    tooltip: 'Voriger Monat',
-                    onPressed: () => _shift(-1),
-                    icon: const Icon(Icons.chevron_left_rounded),
-                  ),
-                  const SizedBox(width: Gap.xs),
-                  OutlinedButton(
-                    onPressed: isCurrent ? null : () => setState(() => _month = DateTime(now.year, now.month)),
-                    child: const Text('Heute'),
-                  ),
-                  const SizedBox(width: Gap.xs),
-                  IconButton.outlined(
-                    tooltip: 'Nächster Monat',
-                    onPressed: () => _shift(1),
-                    icon: const Icon(Icons.chevron_right_rounded),
-                  ),
-                ],
-              ),
+                ]);
+              }),
               _Legend(phases: {for (final w in atpWeeks.values) w['phase'] as String}),
               const SizedBox(height: Gap.md),
               Expanded(

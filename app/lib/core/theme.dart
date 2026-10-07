@@ -83,6 +83,90 @@ abstract final class Radii {
   static const pill = 999.0;
 }
 
+/// Breite, unter der die Oberflaeche fuer das Handy verdichtet wird.
+const compactWidth = 600.0;
+
+/// Handy-Variante eines Themes: kleinere Schaltflaechen, Chips, Eingabefelder und Navigationsleiste.
+ThemeData compactTheme(ThemeData t) {
+  final scheme = t.colorScheme;
+  const radius = Radii.md;
+  RoundedRectangleBorder shape() => RoundedRectangleBorder(borderRadius: BorderRadius.circular(radius));
+  final tt = t.textTheme;
+  return t.copyWith(
+    textTheme: tt.copyWith(
+      displaySmall: tt.displaySmall?.copyWith(fontSize: 30),
+      headlineLarge: tt.headlineLarge?.copyWith(fontSize: 26),
+      headlineMedium: tt.headlineMedium?.copyWith(fontSize: 23),
+      headlineSmall: tt.headlineSmall?.copyWith(fontSize: 20),
+      titleLarge: tt.titleLarge?.copyWith(fontSize: 18),
+      titleMedium: tt.titleMedium?.copyWith(fontSize: 15),
+    ),
+    appBarTheme: t.appBarTheme.copyWith(
+      toolbarHeight: 52,
+      titleTextStyle: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, letterSpacing: -0.3, color: scheme.onSurface),
+    ),
+    inputDecorationTheme: t.inputDecorationTheme.copyWith(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      isDense: true,
+    ),
+    filledButtonTheme: FilledButtonThemeData(
+      style: FilledButton.styleFrom(
+        minimumSize: const Size(0, 40),
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        shape: shape(),
+        textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+        iconSize: 18,
+      ),
+    ),
+    outlinedButtonTheme: OutlinedButtonThemeData(
+      style: OutlinedButton.styleFrom(
+        minimumSize: const Size(0, 38),
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        side: BorderSide(color: scheme.outlineVariant),
+        shape: shape(),
+        textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+        iconSize: 18,
+      ),
+    ),
+    textButtonTheme: TextButtonThemeData(
+      style: TextButton.styleFrom(
+        minimumSize: const Size(0, 36),
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        shape: shape(),
+        textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+        iconSize: 18,
+      ),
+    ),
+    iconButtonTheme: IconButtonThemeData(style: IconButton.styleFrom(iconSize: 20, minimumSize: const Size(36, 36))),
+    chipTheme: t.chipTheme.copyWith(
+      labelStyle: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: scheme.onSurface),
+      labelPadding: const EdgeInsets.symmetric(horizontal: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 0),
+      iconTheme: const IconThemeData(size: 16),
+    ),
+    segmentedButtonTheme: SegmentedButtonThemeData(
+      style: SegmentedButton.styleFrom(
+        visualDensity: const VisualDensity(horizontal: -2, vertical: -2),
+        side: BorderSide(color: scheme.outlineVariant),
+        textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+        iconSize: 16,
+      ),
+    ),
+    navigationBarTheme: t.navigationBarTheme.copyWith(
+      height: 58,
+      labelTextStyle: const WidgetStatePropertyAll(TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+      iconTheme: const WidgetStatePropertyAll(IconThemeData(size: 22)),
+    ),
+    floatingActionButtonTheme: t.floatingActionButtonTheme.copyWith(
+      extendedPadding: const EdgeInsets.symmetric(horizontal: 14),
+      extendedTextStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+      extendedIconLabelSpacing: 6,
+      iconSize: 20,
+    ),
+    listTileTheme: t.listTileTheme.copyWith(dense: true, minVerticalPadding: 4),
+  );
+}
+
 ThemeData buildTheme(Brightness b) {
   final dark = b == Brightness.dark;
   final scheme = ColorScheme.fromSeed(seedColor: AppColors.brand, brightness: b).copyWith(

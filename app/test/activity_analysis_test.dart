@@ -82,7 +82,7 @@ void main() {
     expect(find.text('Kein Coach-Feedback'), findsOneWidget);
   });
 
-  testWidgets('Soll und Ist je Intervall und Bestwerte', (tester) async {
+  testWidgets('Soll und Ist je Intervall', (tester) async {
     await tester.pumpWidget(_app(Column(children: [
       ComplianceCard(
           compliance: Json.from(_analysis['compliance'] as Map), plan: Json.from(_analysis['plan'] as Map)),
@@ -92,8 +92,7 @@ void main() {
     expect(find.text('1 / 2'), findsOneWidget);
     expect(find.text('90 %'), findsOneWidget);
     expect(find.textContaining('Leistungsabfall'), findsOneWidget);
-    expect(find.text('5 min  305 W'), findsOneWidget);
-    expect(find.byIcon(Icons.emoji_events_rounded), findsOneWidget);
+    expect(find.text('Beste Leistungen dieser Fahrt'), findsNothing);
   });
 
   test('Farben und Beschriftungen der Urteile', () {

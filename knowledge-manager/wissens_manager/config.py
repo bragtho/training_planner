@@ -32,6 +32,7 @@ class Config:
     max_papers: int = 20  # neue Studien je Recherche
     ai_timeout: int = 300  # Sekunden je KI-Aufruf
     theme: str = "dark"  # dark | light | system
+    new_after_id: int = 0  # Kandidaten mit hoeherer ID stammen aus der letzten Recherche ("neu")
 
     def clamp(self) -> "Config":
         self.parallel = min(max(int(self.parallel), 1), 3)

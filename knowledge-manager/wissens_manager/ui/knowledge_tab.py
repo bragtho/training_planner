@@ -6,14 +6,16 @@ import json
 from typing import Callable
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFileDialog, QHBoxLayout, QInputDialog, QLabel, QListWidget, QMessageBox, QPushButton,
-                             QSplitter, QTextBrowser, QVBoxLayout, QWidget)
+from PyQt6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFileDialog, QHBoxLayout, QInputDialog, QLabel, QMessageBox, QPushButton,
+                             QSplitter, QVBoxLayout, QWidget)
 
 from .. import topics
 from ..backend import BackendError
 from .card_editor import CardEditorDialog
 from .core import Services, Task
-from .render import CARD_STATUS_LABELS, card_html, esc
+from .detail import CARD_STATUS_COLORS, card_widgets
+from .render import CARD_STATUS_LABELS
+from .widgets import icon_button, EVIDENCE_COLORS, RED, SLATE, Card, CardList, DetailView, ListItem, Toolbar, action_bar, label
 
 
 class KnowledgeTab(QWidget):
@@ -25,46 +27,49 @@ class KnowledgeTab(QWidget):
         self._task: Task | None = None
 
         self.topic = QComboBox()
+        self.topic.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.topic.setMinimumContentsLength(12)
         self.topic.addItem("Alle Themen", None)
-        for key, (label, _) in topics.TOPICS.items():
-            self.topic.addItem(label, key)
+        for key, (label_, _) in topics.TOPICS.items():
+            self.topic.addItem(label_, key)
         self.status = QComboBox()
+        self.status.setMinimumWidth(200)
         self.status.addItem("Aktiv und umstritten", "live")
         for key in ("active", "contested", "watch", "retired"):
             self.status.addItem(CARD_STATUS_LABELS[key], key)
         self.status.addItem("Alle", None)
         self.overdue = QCheckBox("Nur Überprüfung fällig")
-        self.refresh_btn = QPushButton("Aktualisieren")
+        self.refresh_btn = icon_button("refresh", "Aktualisieren")
         self.count = QLabel("")
         self.count.setObjectName("muted")
-        top = QHBoxLayout()
-        for w in (QLabel("Thema"), self.topic, QLabel("Status"), self.status, self.overdue, self.refresh_btn, self.count):
-            top.addWidget(w)
-        top.addStretch()
+        top = Toolbar(self.topic, self.status, self.overdue, self.refresh_btn, right=self.count)
 
-        self.list = QListWidget()
-        self.detail = QTextBrowser()
-        self.detail.setOpenExternalLinks(True)
+        self.list = CardList()
+        self.list.setMinimumWidth(320)
+        self.detail = DetailView()
         split = QSplitter(Qt.Orientation.Horizontal)
+        split.setChildrenCollapsible(False)
+        split.setHandleWidth(24)  # Abstand zwischen Liste und Detail (Stylesheet allein greift nicht auf jedem System)
         split.addWidget(self.list)
         split.addWidget(self.detail)
-        split.setSizes([360, 640])
+        split.setStretchFactor(0, 2)
+        split.setStretchFactor(1, 3)
+        split.setSizes([430, 700])
 
         self.new_btn = QPushButton("Neue Karte …")
+        self.new_btn.setObjectName("primary")
         self.edit_btn = QPushButton("Bearbeiten …")
         self.retire_btn = QPushButton("Stilllegen …")
         self.retire_btn.setObjectName("danger")
         self.history_btn = QPushButton("Verlauf")
         self.export_btn = QPushButton("Sicherung exportieren …")
-        actions = QHBoxLayout()
-        for b in (self.new_btn, self.edit_btn, self.retire_btn, self.history_btn, self.export_btn):
-            actions.addWidget(b)
-        actions.addStretch()
 
         lay = QVBoxLayout(self)
-        lay.addLayout(top)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(16)
+        lay.addWidget(top)
         lay.addWidget(split, 1)
-        lay.addLayout(actions)
+        lay.addWidget(action_bar(self.new_btn, self.edit_btn, self.retire_btn, self.history_btn, self.export_btn))
 
         self.topic.currentIndexChanged.connect(self._populate)
         self.status.currentIndexChanged.connect(self._populate)
@@ -83,7 +88,7 @@ class KnowledgeTab(QWidget):
         self.count.setText("Lade ...")
         self._task = Task(lambda progress, cancelled: s.backend.cards(), self)
         self._task.done.connect(self._loaded)
-        self._task.failed.connect(lambda m: (self.count.setText(""), self.detail.setPlainText(f"Fehler: {m}")))
+        self._task.failed.connect(lambda m: (self.count.setText(""), self.detail.show_message(m, "Fehler beim Laden")))
         self._task.start()
 
     def _loaded(self, cards: list[dict]) -> None:
@@ -101,14 +106,22 @@ class KnowledgeTab(QWidget):
         self.list.clear()
         for c in shown:
             flag = " ⚠ Review fällig" if c.get("review_overdue") else ""
-            self.list.addItem(f"[{c['evidence']}] {c['title']}\n{c['topic_label']} · {CARD_STATUS_LABELS.get(c['status'], c['status'])}{flag}")
+            status = CARD_STATUS_LABELS.get(c["status"], c["status"])
+            pills = [(status, CARD_STATUS_COLORS.get(c["status"], SLATE))]
+            if c.get("review_overdue"):
+                pills.append(("Review fällig", RED))
+            if c.get("safety"):
+                pills.append(("sicherheitsrelevant", RED))
+            self.list.add(f"[{c['evidence']}] {c['title']}\n{c['topic_label']} · {status}{flag}",
+                          ListItem(title=c["title"], meta=c.get("topic_label") or "", pills=pills,
+                                   badge=(c["evidence"], EVIDENCE_COLORS.get(c["evidence"], SLATE))))
         self.list.blockSignals(False)
         self.count.setText(f"{len(shown)} von {len(self.cards)} Karten")
         if shown:
             self.list.setCurrentRow(0)
             self._show(0)
         else:
-            self.detail.setHtml("<p style='color:#94a3b8'>Keine Karten in dieser Ansicht.</p>")
+            self.detail.show_message("Keine Karten in dieser Ansicht. Ändere die Filter oder lege eine neue Karte an.")
             self._update_buttons()
 
     def current(self) -> dict | None:
@@ -117,7 +130,10 @@ class KnowledgeTab(QWidget):
 
     def _show(self, _row: int) -> None:
         c = self.current()
-        self.detail.setHtml(card_html(c) if c else "")
+        if c:
+            self.detail.set_widgets(card_widgets(c))
+        else:
+            self.detail.clear()
         self._update_buttons()
 
     def _update_buttons(self) -> None:
@@ -168,16 +184,33 @@ class KnowledgeTab(QWidget):
         except BackendError as e:
             QMessageBox.warning(self, "Verlauf", str(e))
             return
-        html = "".join(f"<h4>Version {h['version']} · {esc(h['action'])} · {esc(h['changed_at'][:16].replace('T', ' '))}</h4>"
-                       + (f"<p><i>{esc(h['note'])}</i></p>" if h.get("note") else "")
-                       + f"<p>{esc((h['snapshot'] or {}).get('recommendation'))}</p>" for h in history)
         dlg = QDialog(self)
         dlg.setWindowTitle(f"Verlauf: {c['title']}")
-        dlg.resize(700, 600)
+        dlg.resize(760, 640)
         v = QVBoxLayout(dlg)
-        view = QTextBrowser()
-        view.setHtml(html or "<p>Kein Verlauf.</p>")
-        v.addWidget(view)
+        v.setContentsMargins(24, 24, 24, 24)
+        v.setSpacing(16)
+        v.addWidget(label(f"Verlauf: {c['title']}", "h2"))
+        view = DetailView()
+        actions = {"created": "angelegt", "updated": "geändert", "retired": "stillgelegt"}
+        cards = []
+        for h in history:
+            card = Card(f"Version {h['version']} · {actions.get(h['action'], h['action'])}",
+                        h["changed_at"][:16].replace("T", " "))
+            if h.get("note"):
+                card.add(label(h["note"], "muted", selectable=True))
+            rec = (h.get("snapshot") or {}).get("recommendation")
+            if rec:
+                card.add(label(rec, "body", selectable=True))
+            cards.append(card)
+        if cards:
+            view.set_widgets(cards)
+        else:
+            view.show_message("Kein Verlauf.")
+        v.addWidget(view, 1)
+        close = QPushButton("Schließen")
+        close.clicked.connect(dlg.accept)
+        v.addWidget(action_bar(close))
         dlg.exec()
 
     def export_all(self) -> None:

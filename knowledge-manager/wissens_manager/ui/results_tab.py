@@ -6,14 +6,15 @@ from typing import Callable
 
 from PyQt6.QtCore import Qt, QUrl, pyqtSignal
 from PyQt6.QtGui import QDesktopServices
-from PyQt6.QtWidgets import (QComboBox, QHBoxLayout, QInputDialog, QLabel, QListWidget, QListWidgetItem, QMessageBox, QPushButton, QSplitter,
-                             QTextBrowser, QVBoxLayout, QWidget)
+from PyQt6.QtWidgets import QComboBox, QInputDialog, QLabel, QMessageBox, QPushButton, QSplitter, QVBoxLayout, QWidget
 
 from .. import topics
 from ..backend import BackendError
 from .card_editor import CardEditorDialog
 from .core import Services, Task
-from .render import STATUS_LABELS, candidate_html, candidate_title, evidence_cap
+from .detail import ACTION_COLORS, candidate_widgets
+from .render import ACTION_LABELS, candidate_title, evidence_cap, found_on, quote_summary
+from .widgets import icon_button, GREEN, RED, CardList, DetailView, ListItem, Segmented, Toolbar, action_bar
 
 _LETTERS = "ABC"
 
@@ -34,28 +35,31 @@ class ResultsTab(QWidget):
         self.items: list[dict] = []
         self._task: Task | None = None
 
-        self.status = QComboBox()
-        for key in ("pending", "watch", "accepted", "rejected"):
-            self.status.addItem(STATUS_LABELS[key], key)
+        self.new_after_id: int | None = None  # Kandidaten mit hoeherer ID stammen aus der letzten Recherche
+        self.status = Segmented([("Offen", "pending"), ("Watchlist", "watch"), ("Aufgenommen", "accepted"), ("Verworfen", "rejected")])
+        self.scope = Segmented([("Alle", "all"), ("Neu", "new"), ("Älter", "old")])
         self.topic = QComboBox()
+        self.topic.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.topic.setMinimumContentsLength(12)
         self.topic.addItem("Alle Themen", None)
         for key, (label, _) in topics.TOPICS.items():
             self.topic.addItem(label, key)
-        self.refresh_btn = QPushButton("Aktualisieren")
+        self.refresh_btn = icon_button("refresh", "Aktualisieren")
         self.count = QLabel("")
         self.count.setObjectName("muted")
-        top = QHBoxLayout()
-        for w in (QLabel("Status"), self.status, QLabel("Thema"), self.topic, self.refresh_btn, self.count):
-            top.addWidget(w)
-        top.addStretch()
+        top = Toolbar(self.status, self.scope, self.topic, self.refresh_btn, right=self.count)
 
-        self.list = QListWidget()
-        self.detail = QTextBrowser()
-        self.detail.setOpenExternalLinks(True)
+        self.list = CardList()
+        self.list.setMinimumWidth(320)
+        self.detail = DetailView()
         split = QSplitter(Qt.Orientation.Horizontal)
+        split.setChildrenCollapsible(False)
+        split.setHandleWidth(24)  # Abstand zwischen Liste und Detail (Stylesheet allein greift nicht auf jedem System)
         split.addWidget(self.list)
         split.addWidget(self.detail)
-        split.setSizes([360, 640])
+        split.setStretchFactor(0, 2)
+        split.setStretchFactor(1, 3)
+        split.setSizes([430, 700])
 
         self.accept_btn = QPushButton("Aufnehmen …")
         self.accept_btn.setObjectName("primary")
@@ -63,18 +67,17 @@ class ResultsTab(QWidget):
         self.reject_btn = QPushButton("Verwerfen …")
         self.reject_btn.setObjectName("danger")
         self.open_btn = QPushButton("Studie im Browser öffnen")
-        actions = QHBoxLayout()
-        for b in (self.accept_btn, self.watch_btn, self.reject_btn, self.open_btn):
-            actions.addWidget(b)
-        actions.addStretch()
 
         lay = QVBoxLayout(self)
-        lay.addLayout(top)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(16)
+        lay.addWidget(top)
         lay.addWidget(split, 1)
-        lay.addLayout(actions)
+        lay.addWidget(action_bar(self.accept_btn, self.watch_btn, self.reject_btn, self.open_btn))
 
         self.status.currentIndexChanged.connect(self.refresh)
         self.topic.currentIndexChanged.connect(self._populate)
+        self.scope.currentIndexChanged.connect(self._populate)
         self.refresh_btn.clicked.connect(self.refresh)
         self.list.currentRowChanged.connect(self._show)
         self.accept_btn.clicked.connect(self.accept_candidate)
@@ -91,28 +94,44 @@ class ResultsTab(QWidget):
         self.count.setText("Lade ...")
         self._task = Task(lambda progress, cancelled: s.backend.candidates(status), self)
         self._task.done.connect(self._loaded)
-        self._task.failed.connect(lambda m: (self.count.setText(""), self.detail.setPlainText(f"Fehler: {m}")))
+        self._task.failed.connect(lambda m: (self.count.setText(""), self.detail.show_message(m, "Fehler beim Laden")))
         self._task.start()
 
     def _loaded(self, items: list[dict]) -> None:
         self.items = sorted(items, key=lambda c: -c["id"])
         self._populate()
 
+    def is_new(self, c: dict) -> bool:
+        return self.new_after_id is not None and c["id"] > self.new_after_id
+
+    def mark_new(self, after_id: int) -> None:
+        """Ab jetzt gelten Kandidaten mit hoeherer ID als neu; die Ansicht springt auf die neuen."""
+        self.new_after_id = after_id
+        self.scope.blockSignals(True)
+        self.scope.setCurrentIndex(self.scope.findData("new"))
+        self.scope.blockSignals(False)
+
     def _populate(self) -> None:
-        topic = self.topic.currentData()
-        shown = [c for c in self.items if topic is None or c["topic"] == topic]
+        topic, scope = self.topic.currentData(), self.scope.currentData()
+        shown = [c for c in self.items if (topic is None or c["topic"] == topic)
+                 and (scope == "all" or (scope == "new") == self.is_new(c))]
+        # Neue zuerst, innerhalb davon die neueste Studie zuerst
+        shown.sort(key=lambda c: (not self.is_new(c), -c["id"]))
         self._shown = shown
         self.list.blockSignals(True)
         self.list.clear()
         for c in shown:
-            self.list.addItem(QListWidgetItem(candidate_title(c)))
+            self.list.add(candidate_title(c, new=self.is_new(c)), self._list_item(c))
         self.list.blockSignals(False)
-        self.count.setText(f"{len(shown)} Einträge")
+        new_count = sum(1 for c in shown if self.is_new(c))
+        self.count.setText(f"{len(shown)} Einträge" + (f" · {new_count} neu" if new_count and scope == "all" else ""))
         if shown:
             self.list.setCurrentRow(0)
             self._show(0)
         else:
-            self.detail.setHtml("<p style='color:#94a3b8'>Keine Einträge. Starte eine Recherche oder wechsle den Status.</p>")
+            hint = {"new": "Keine neuen Studien aus der letzten Recherche.", "old": "Keine älteren Einträge."}.get(
+                scope, "Keine Einträge. Starte eine Recherche oder wechsle den Status.")
+            self.detail.show_message(hint)
             self._update_buttons()
 
     def current(self) -> dict | None:
@@ -120,9 +139,27 @@ class ResultsTab(QWidget):
         shown = getattr(self, "_shown", [])
         return shown[r] if 0 <= r < len(shown) else None
 
+    def _list_item(self, c: dict) -> ListItem:
+        a = c.get("analysis") or {}
+        ai, paper, chk = a.get("ai") or {}, a.get("paper") or {}, a.get("check") or {}
+        new = self.is_new(c)
+        meta = " · ".join(x for x in (topics.topic_label(c["topic"]), str(paper.get("year") or ""),
+                                      "" if new else (f"gefunden {found_on(c)}" if found_on(c) else "")) if x)
+        action = ai.get("suggested_action")
+        pills = [("NEU", GREEN)] if new else []
+        pills.append((ACTION_LABELS.get(action, "—"), ACTION_COLORS.get(action, "#64748b")))
+        if (chk.get("retraction") or {}).get("status") == "retracted":
+            pills.append(("zurückgezogen", RED))
+        elif (chk.get("cross_check") or {}).get("verdict") == "issues" or quote_summary(chk)[0] is False:
+            pills.append(("prüfen", RED))
+        return ListItem(title=c["title"], meta=meta, pills=pills, highlight=new)
+
     def _show(self, _row: int) -> None:
         c = self.current()
-        self.detail.setHtml(candidate_html(c) if c else "")
+        if c:
+            self.detail.set_widgets(candidate_widgets(c, new=self.is_new(c)))
+        else:
+            self.detail.clear()
         self._update_buttons()
 
     def _update_buttons(self) -> None:

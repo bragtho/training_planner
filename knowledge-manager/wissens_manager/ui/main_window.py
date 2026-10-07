@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import QSize, Qt
-from PyQt6.QtWidgets import (QApplication, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QFrame, QHBoxLayout, QLabel, QLineEdit, QMainWindow,
-                             QMessageBox, QPushButton, QSpinBox, QTabWidget, QVBoxLayout, QWidget)
+from PyQt6.QtWidgets import (QApplication, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMainWindow,
+                             QMessageBox, QPushButton, QScrollArea, QSpinBox, QTabWidget, QVBoxLayout, QWidget)
 
 from .. import __version__
 from ..ai import ClaudeCliAdapter
 from ..backend import BackendError
 from ..config import Config, save_config
 from .core import PALETTE, Services, Task, apply_theme, is_dark, material_icon
+from .widgets import Card, DialogFrame, action_bar, labeled
 from .knowledge_tab import KnowledgeTab
 from .research_tab import ResearchTab
 from .results_tab import ResultsTab
@@ -20,7 +21,7 @@ class SettingsDialog(QDialog):
     def __init__(self, parent, cfg: Config):
         super().__init__(parent)
         self.setWindowTitle("Einstellungen")
-        self.resize(560, 420)
+        self.resize(640, 760)
         self.cfg = cfg
         self.url = QLineEdit(cfg.backend_url)
         self.token = QLineEdit(cfg.admin_token)
@@ -38,34 +39,48 @@ class SettingsDialog(QDialog):
         self.batch.setRange(1, 8)
         self.batch.setValue(cfg.batch_size)
         self.theme = QComboBox()
-        for key, label in (("dark", "Dunkel"), ("light", "Hell"), ("system", "Wie Windows")):
-            self.theme.addItem(label, key)
+        for key, label_ in (("dark", "Dunkel"), ("light", "Hell"), ("system", "Wie Windows")):
+            self.theme.addItem(label_, key)
         self.theme.setCurrentIndex(max(0, self.theme.findData(cfg.theme)))
         self.max = QSpinBox()
         self.max.setRange(1, 100)
         self.max.setValue(cfg.max_papers)
-        form = QFormLayout()
-        form.addRow("Backend-Adresse", self.url)
-        form.addRow("Verwaltungsschlüssel", self.token)
-        form.addRow("Claude-Programm", self.claude)
-        form.addRow("Modell", self.model)
-        form.addRow("Gleichzeitige KI-Aufrufe", self.parallel)
-        form.addRow("Abstracts je KI-Aufruf", self.batch)
-        form.addRow("Neue Studien je Recherche", self.max)
-        form.addRow("Farbschema", self.theme)
-        self.result = QLabel("")
-        self.result.setWordWrap(True)
+
+        frame = DialogFrame(self, "Einstellungen", "Verbindung zum Backend, KI und Darstellung.")
+        conn = Card("Verbindung", "Backend der Trainings-App und Verwaltungsschlüssel.", spacing=14)
+        conn.add(labeled("Backend-Adresse", self.url))
+        conn.add(labeled("Verwaltungsschlüssel", self.token))
         test = QPushButton("Verbindungen testen")
         test.clicked.connect(self._test)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        lay = QVBoxLayout(self)
-        lay.addLayout(form)
-        lay.addWidget(test)
-        lay.addWidget(self.result)
-        lay.addStretch()
-        lay.addWidget(buttons)
+        self.result = QLabel("")
+        self.result.setObjectName("small")
+        self.result.setWordWrap(True)
+        conn.add(action_bar(test))
+        conn.add(self.result)
+        frame.add(conn)
+        ai = Card("KI-Auswertung", "Läuft über das Claude-Programm mit Abo-Anmeldung.", spacing=14)
+        ai.add(labeled("Claude-Programm", self.claude))
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(16)
+        grid.setVerticalSpacing(14)
+        grid.addWidget(labeled("Modell", self.model), 0, 0)
+        grid.addWidget(labeled("Gleichzeitige KI-Aufrufe", self.parallel), 0, 1)
+        grid.addWidget(labeled("Abstracts je KI-Aufruf", self.batch), 1, 0)
+        grid.addWidget(labeled("Neue Studien je Recherche", self.max), 1, 1)
+        ai.body.addLayout(grid)
+        frame.add(ai)
+        look = Card("Darstellung", spacing=14)
+        look.add(labeled("Farbschema", self.theme))
+        frame.add(look)
+        frame.content.addStretch(1)
+        save = QPushButton("Speichern")
+        save.setObjectName("primary")
+        cancel = QPushButton("Abbrechen")
+        save.clicked.connect(self.accept)
+        cancel.clicked.connect(self.reject)
+        frame.footer.addStretch(1)
+        frame.footer.addWidget(cancel)
+        frame.footer.addWidget(save)
 
     def values(self) -> Config:
         return Config(backend_url=self.url.text(), admin_token=self.token.text().strip(), claude_path=self.claude.text().strip() or "claude",
@@ -98,7 +113,15 @@ class MainWindow(QMainWindow):
         self.results = ResultsTab(self.get_services)
         self.knowledge = KnowledgeTab(self.get_services)
         tabs = QTabWidget()
-        tabs.addTab(self.research, "Recherche")
+        # Die Recherche ist hoch: in einem Scrollbereich, damit das Fenster auch auf kleinen Bildschirmen passt
+        research_scroll = QScrollArea()
+        research_scroll.setObjectName("detail")
+        research_scroll.setWidgetResizable(True)
+        research_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        research_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.research.setObjectName("detailInner")
+        research_scroll.setWidget(self.research)
+        tabs.addTab(research_scroll, "Recherche")
         tabs.addTab(self.results, "Ergebnisse")
         tabs.addTab(self.knowledge, "Wissensbasis")
         tabs.tabBar().hide()
@@ -132,7 +155,8 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
         self._show_page(0)
 
-        self.research.finished.connect(lambda: (self.results.refresh(), tabs.setCurrentWidget(self.results)))
+        self.results.new_after_id = cfg.new_after_id or None
+        self.research.finished.connect(self._research_finished)
         self.results.changed.connect(self.knowledge.refresh)
         tabs.currentChanged.connect(self._tab_changed)
         tabs.currentChanged.connect(self._show_page)
@@ -215,6 +239,17 @@ class MainWindow(QMainWindow):
         for i, btn in enumerate(self.nav):
             btn.setChecked(i == index)
         self._paint_icons()
+
+    def _research_finished(self) -> None:
+        """Nach einer Recherche: die neu gefundenen Studien kennzeichnen, merken und zeigen."""
+        self.cfg.new_after_id = self.research.new_after_id
+        try:
+            save_config(self.cfg)
+        except OSError:
+            pass  # nur das Merken ueber einen Neustart hinaus geht verloren
+        self.results.mark_new(self.research.new_after_id)
+        self.results.refresh()
+        self.tabs.setCurrentWidget(self.results)
 
     def get_services(self) -> Services:
         return self._services

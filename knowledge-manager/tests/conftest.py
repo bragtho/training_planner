@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 
 import httpx
 import pytest
+
+# Tests duerfen nie die echte config.json (mit Verwaltungsschluessel) lesen oder ueberschreiben
+os.environ["WISSENS_MANAGER_CONFIG"] = os.path.join(tempfile.mkdtemp(prefix="wm-test-"), "config.json")
 
 from wissens_manager.ai import AiError
 
@@ -61,7 +66,7 @@ class FakeBackend:
             if (it["doi"] and it["doi"] in known["dois"]) or (it["pmid"] and it["pmid"] in known["pmids"]):
                 skipped += 1
                 continue
-            self.candidates_db.append({"id": len(self.candidates_db) + 1, "status": "pending", **it})
+            self.candidates_db.append({"id": len(self.candidates_db) + 1, "status": "pending", "created_at": "2026-10-07T10:00:00+00:00", **it})
             created += 1
         return {"created": created, "skipped": skipped}
 
@@ -115,6 +120,7 @@ class FakeAi:
         self.total_cost_usd = 0.0
         self.prompts: list[str] = []
         self.fail_on = fail_on
+        self.plan = None
         self.limit_after = limit_after
 
     def run_json(self, system, prompt, schema):
@@ -128,6 +134,11 @@ class FakeAi:
         ids = [line[1:line.index("]")] for line in prompt.splitlines() if line.startswith("[P")]
         if self.fail_on and self.fail_on in prompt:
             raise AiError("Zeitüberschreitung")
+        if "Suchplan fuer diese Forschungsfrage" in prompt:
+            self.plan_requests = getattr(self, "plan_requests", []) + [prompt]
+            return self.plan or {"queries": ['TITLE_ABS:("interval training") AND TITLE_ABS:(cycling OR cyclists)',
+                                             'TITLE_ABS:(HIIT) AND TITLE_ABS:(cyclists)'],
+                                 "topic": "intervalle", "label": "Intervalle", "note": "Sucht Intervallstudien."}
         if "Pruefe jede Auswertung" in prompt:
             return {"results": [{"id": i, "verdict": "ok", "issues": []} for i in ids]}
         return {"results": [{**self.default(pid), **self.relevant.get(int(pid[1:]), {})} for pid in ids]}

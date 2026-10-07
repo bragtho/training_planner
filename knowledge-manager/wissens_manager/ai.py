@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -19,6 +20,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from . import prompts
+from .topics import TOPICS
 from .europepmc import Paper
 
 _LIMIT_HINTS = ("usage limit", "rate limit", "limit reached", "quota", "overloaded", "429", "credit")
@@ -142,6 +144,7 @@ def _clean_triage(raw: dict) -> dict:
     out["sample_n"] = n if isinstance(n, int) and not isinstance(n, bool) and n >= 0 else None
     for k in ("relevance_reason", "population", "summary", "finding", "limitations"):
         out[k] = str(raw.get(k) or "").strip()
+    out["topic"] = raw.get("topic") if raw.get("topic") in TOPICS else None
     out["target_card"] = raw.get("target_card") or None
     if not out["relevant"] or out["suggested_action"] == "irrelevant":
         out["suggested_action"] = "irrelevant"
@@ -151,9 +154,33 @@ def _clean_triage(raw: dict) -> dict:
     return out
 
 
-def triage(adapter: AiAdapter, topic_label: str, existing: list[dict], papers: dict[str, Paper]) -> dict[str, dict]:
+_FORBIDDEN_FIELDS = re.compile(r"\b(PUB_TYPE|PUB_YEAR|SRC|DOI|AUTH|EXT_ID|FIRST_PDATE|SORT_DATE)\s*:", re.IGNORECASE)
+
+
+def valid_query(q: str) -> bool:
+    """Sicherheitsnetz fuer KI-Suchanfragen: nicht leer, nicht zu lang, Klammern und Anfuehrungszeichen ausgewogen, keine Filterfelder."""
+    q = q.strip()
+    return bool(q) and len(q) <= 600 and q.count("(") == q.count(")") and q.count('"') % 2 == 0 and not _FORBIDDEN_FIELDS.search(q)
+
+
+def plan_search(adapter: AiAdapter, request: str) -> dict:
+    """KI-Schritt 0: Forschungsfrage des Nutzers in Europe-PMC-Suchanfragen, Thema und Titel uebersetzen."""
+    request = request.strip()
+    if not request:
+        raise AiError("Bitte beschreibe, wonach gesucht werden soll")
+    payload = adapter.run_json(prompts.PLAN_SYSTEM, prompts.plan_prompt(request), prompts.PLAN_SCHEMA)
+    queries = [q.strip() for q in (payload.get("queries") or []) if isinstance(q, str) and valid_query(q)][:3]
+    if not queries:
+        raise AiError("Die KI hat keine brauchbare Suchanfrage erzeugt. Formuliere die Frage anders oder gib unter „Erweitert“ eine Suchanfrage an.")
+    topic = payload.get("topic") if payload.get("topic") in TOPICS else "sonstiges"
+    label = str(payload.get("label") or "").strip()[:40] or request[:40]
+    return {"queries": queries, "topic": topic, "label": label, "note": str(payload.get("note") or "").strip()[:300]}
+
+
+def triage(adapter: AiAdapter, topic_label: str, existing: list[dict], papers: dict[str, Paper],
+           scope: str = "zu diesem Thema") -> dict[str, dict]:
     """KI-Schritt 1: Bewertung und Zusammenfassung. Gibt je Studien-ID ein bereinigtes Ergebnis zurueck."""
-    payload = adapter.run_json(prompts.TRIAGE_SYSTEM, prompts.triage_prompt(topic_label, existing, papers), prompts.TRIAGE_SCHEMA)
+    payload = adapter.run_json(prompts.TRIAGE_SYSTEM, prompts.triage_prompt(topic_label, existing, papers, scope), prompts.TRIAGE_SCHEMA)
     out: dict[str, dict] = {}
     for r in payload.get("results") or []:
         if isinstance(r, dict) and r.get("id") in papers:

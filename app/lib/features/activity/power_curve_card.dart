@@ -63,7 +63,7 @@ class _Body extends StatelessWidget {
 
   int? get _selectedIndex {
     final s = selected;
-    if (s == null) return null;
+    if (s == null || s.label != null) return null; // Runden gehoeren nicht zur Leistungskurve
     final i = points.indexWhere((p) => p['duration_s'] == s.durationS);
     return i < 0 ? null : i;
   }

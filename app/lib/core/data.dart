@@ -36,10 +36,23 @@ final streamsProvider =
   return Json.from(r.data as Map);
 });
 
+/// Ausschnitt der Streams (Sekunden seit Start) in voller Aufloesung, fuer gezoomte Diagramme.
+final streamsWindowProvider = FutureProvider.autoDispose.family<Json, (int, int, int)>((ref, key) async {
+  final (id, from, to) = key;
+  final r = await ref.watch(apiProvider).dio.get('/activities/$id/streams', queryParameters: {'from_s': from, 'to_s': to});
+  return Json.from(r.data as Map);
+});
+
 /// Beste Durchschnittsleistung je Dauer dieser Fahrt, mit Startsekunde des besten Abschnitts.
 final powerCurveProvider = FutureProvider.autoDispose.family<List<Json>, int>((ref, id) async {
   final r = await ref.watch(apiProvider).dio.get('/activities/$id/power-curve');
   return [for (final p in (r.data as Map)['points'] as List) Json.from(p as Map)];
+});
+
+/// Runden des Geraets (Lap-Taste oder Auto-Lap); leer, wenn keine aufgezeichnet wurden.
+final lapsProvider = FutureProvider.autoDispose.family<List<Json>, int>((ref, id) async {
+  final r = await ref.watch(apiProvider).dio.get('/activities/$id/laps');
+  return [for (final l in (r.data as Map)['laps'] as List) Json.from(l as Map)];
 });
 
 final profileProvider = FutureProvider.autoDispose<Json>((ref) async {

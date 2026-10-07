@@ -1,3 +1,4 @@
+from bisect import bisect_left, bisect_right
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -86,8 +87,17 @@ def _downsample(values: list, step: int) -> list:
 
 
 @router.get("/activities/{activity_id}/streams")
-def get_streams(activity_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    """Streams (Watt, Puls, ...). Werden beim ersten Aufruf von Strava geholt; berechnet NP/TSS exakt neu."""
+def get_streams(
+    activity_id: int,
+    from_s: int | None = None,
+    to_s: int | None = None,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    """Streams (Watt, Puls, ...). Werden beim ersten Aufruf von Strava geholt; berechnet NP/TSS exakt neu.
+
+    Mit `from_s`/`to_s` (Sekunden seit Start) kommt nur dieser Ausschnitt, wieder auf hoechstens MAX_STREAM_POINTS
+    Punkte verdichtet; so bekommt ein gezoomtes Diagramm die volle Aufloesung."""
     a = _get(db, user, activity_id)
     if not a.streams:
         if a.source != "strava":
@@ -112,9 +122,34 @@ def get_streams(activity_id: int, user: User = Depends(current_user), db: Sessio
             if gps is not None:
                 a.streams = {**a.streams, "latlng": gps}
                 db.commit()
-    n = max((len(v) for v in a.streams.values()), default=0)
+    series = {k: v for k, v in a.streams.items() if k != "laps"}
+    if from_s is not None or to_s is not None:
+        time = series.get("time") or []
+        lo = bisect_left(time, from_s) if from_s is not None else 0
+        hi = bisect_right(time, to_s) if to_s is not None else len(time)
+        series = {k: (v[lo:hi] if len(v) == len(time) else v) for k, v in series.items()}
+    n = max((len(v) for v in series.values()), default=0)
     step = max(1, -(-n // MAX_STREAM_POINTS))
-    return {k: _downsample(v, step) for k, v in a.streams.items()}
+    return {k: _downsample(v, step) for k, v in series.items()}
+
+
+@router.get("/activities/{activity_id}/laps")
+def get_laps(activity_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Runden des Geraets (Lap-Taste oder Auto-Lap) von Strava. Werden einmal geholt und gespeichert."""
+    a = _get(db, user, activity_id)
+    if a.source != "strava" or not a.streams:
+        return {"laps": []}
+    if "laps" not in a.streams:
+        integ = db.scalar(select(Integration).where(Integration.user_id == user.id, Integration.provider == "strava"))
+        if integ is None:
+            return {"laps": []}
+        try:
+            laps = strava.parse_laps(strava.StravaClient(db, integ).get_laps(a.external_id))
+        except strava.StravaError as e:
+            raise HTTPException(e.status if e.status in (401, 404, 429) else 502, str(e))
+        a.streams = {**a.streams, "laps": laps}
+        db.commit()
+    return {"laps": a.streams["laps"]}
 
 
 @router.get("/activities/{activity_id}/power-curve")

@@ -146,6 +146,10 @@ class StravaClient:
         data = self.get(f"/activities/{activity_id}/streams", {"keys": STREAM_KEYS, "key_by_type": "true"})
         return {k: v.get("data", []) for k, v in data.items()} if isinstance(data, dict) else {}
 
+    def get_laps(self, activity_id: int | str) -> list[dict]:
+        data = self.get(f"/activities/{activity_id}/laps")
+        return data if isinstance(data, list) else []
+
     def deauthorize(self) -> None:
         try:
             self.http.post(DEAUTH_URL, data={"access_token": self._access_token()})
@@ -263,6 +267,28 @@ def resample_1hz(time_s: list[int], values: list[float], max_hold_s: int = 5) ->
             if 1 < gap <= max_hold_s:
                 for j in range(1, gap):
                     out[int(t) + j] = out[int(t)]
+    return out
+
+
+def parse_laps(raw: list[dict]) -> list[dict]:
+    """Strava-Runden in unser Format; Startsekunde aus den aufsummierten Rundenzeiten."""
+    out, start = [], 0
+    for i, lap in enumerate(sorted(raw, key=lambda r: r.get("lap_index") or 0), start=1):
+        dur = int(lap.get("elapsed_time") or lap.get("moving_time") or 0)
+        if dur <= 0:
+            continue
+        out.append({
+            "index": i,
+            "start_s": start,
+            "duration_s": dur,
+            "distance_m": float(lap.get("distance") or 0),
+            "avg_watts": lap.get("average_watts"),
+            "avg_heartrate": lap.get("average_heartrate"),
+            "avg_cadence": lap.get("average_cadence"),
+            "avg_speed_ms": lap.get("average_speed"),
+            "elevation_gain_m": lap.get("total_elevation_gain"),
+        })
+        start += dur
     return out
 
 

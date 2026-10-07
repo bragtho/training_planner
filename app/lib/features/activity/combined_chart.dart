@@ -5,7 +5,6 @@ import '../../core/charts.dart';
 import '../../core/theme.dart';
 import '../../core/ui.dart';
 import 'highlight.dart';
-import 'power_curve_card.dart' show formatClock;
 import 'zoom.dart';
 
 /// Eine Messreihe der Fahrt fuer die kombinierte Ansicht.
@@ -177,7 +176,6 @@ class _Readout extends StatelessWidget {
       child: x == null || shown.isEmpty
           ? Text('Berühre oder fahre mit der Maus über das Diagramm, um die Werte zu sehen.', style: t.textTheme.bodySmall?.copyWith(color: muted))
           : Wrap(spacing: Gap.lg, runSpacing: Gap.xs, crossAxisAlignment: WrapCrossAlignment.center, children: [
-              Text('bei ${formatClock((x! * 60).round())}', style: t.textTheme.labelLarge?.copyWith(color: muted)),
               for (final s in shown)
                 Text.rich(TextSpan(children: [
                   TextSpan(text: '${s.title} ', style: t.textTheme.bodySmall?.copyWith(color: muted)),

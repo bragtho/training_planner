@@ -9,10 +9,17 @@ import '../../core/theme.dart';
 import '../../core/ui.dart';
 
 /// Zeigt, was sich der Coach ueber den Athleten gemerkt hat, und erlaubt das Loeschen einzelner Eintraege.
-class CoachMemoryCard extends ConsumerWidget {
+class CoachMemoryCard extends ConsumerStatefulWidget {
   const CoachMemoryCard({super.key});
 
-  Future<void> _forget(BuildContext context, WidgetRef ref, CoachMemory m) async {
+  @override
+  ConsumerState<CoachMemoryCard> createState() => _CoachMemoryCardState();
+}
+
+class _CoachMemoryCardState extends ConsumerState<CoachMemoryCard> {
+  bool _open = false;
+
+  Future<void> _forget(CoachMemory m) async {
     final messenger = ScaffoldMessenger.of(context);
     try {
       await ref.read(apiProvider).dio.delete('/coach/memories/${m.id}');
@@ -25,7 +32,7 @@ class CoachMemoryCard extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final t = Theme.of(context);
     final muted = t.colorScheme.onSurfaceVariant;
     final memories = ref.watch(coachMemoriesProvider);
@@ -33,63 +40,84 @@ class CoachMemoryCard extends ConsumerWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SectionHeader(
-            title: 'Was der Coach über Dich weiß',
-            subtitle: 'Merkt er sich selbst aus Euren Gesprächen',
+          InkWell(
+            borderRadius: BorderRadius.circular(Radii.md),
+            onTap: () => setState(() => _open = !_open),
+            child: Row(
+              children: [
+                Icon(Icons.auto_awesome, size: 18, color: t.colorScheme.primary),
+                const SizedBox(width: Gap.sm),
+                Expanded(
+                  child: Text(
+                    memories.maybeWhen(
+                      data: (l) => l.isEmpty ? 'Coach-Notizen' : 'Coach-Notizen (${l.length})',
+                      orElse: () => 'Coach-Notizen',
+                    ),
+                    style: t.textTheme.titleSmall,
+                  ),
+                ),
+                Icon(_open ? Icons.expand_less : Icons.expand_more, color: muted),
+              ],
+            ),
           ),
-          memories.when(
-            loading: () => const LoadingBlock(height: 60),
-            error: (e, _) => StatusMessage.error(errorMessage(e), onRetry: () => ref.invalidate(coachMemoriesProvider)),
-            data: (list) => list.isEmpty
-                ? Text(
-                    'Noch nichts gespeichert. Erzähl dem Coach von Deiner Saisonphase, Vorlieben oder Einschränkungen, '
-                    'er merkt sich das Wichtige von allein.',
-                    style: t.textTheme.bodyMedium?.copyWith(color: muted),
-                  )
-                : Column(
-                    children: [
-                      for (final m in list)
-                        Container(
-                          margin: const EdgeInsets.only(bottom: Gap.sm),
-                          padding: const EdgeInsets.only(left: Gap.md),
-                          decoration: BoxDecoration(
-                            color: t.colorScheme.surfaceContainer.withValues(alpha: 0.6),
-                            borderRadius: BorderRadius.circular(Radii.md),
-                          ),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Padding(
-                                padding: const EdgeInsets.only(top: 12, right: Gap.sm),
-                                child: Icon(Icons.auto_awesome, size: 16, color: t.colorScheme.primary),
-                              ),
-                              Expanded(
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(vertical: 10),
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(m.text, style: t.textTheme.bodyMedium),
-                                      if (m.validUntil != null)
-                                        Text(
-                                          'gilt bis ${DateFormat('d. MMMM yyyy', 'de').format(m.validUntil!)}',
-                                          style: t.textTheme.labelSmall?.copyWith(color: muted),
-                                        ),
-                                    ],
+          if (_open) ...[
+            const SizedBox(height: Gap.xs),
+            Text('Merkt sich der Coach selbst aus Euren Gesprächen', style: t.textTheme.bodySmall?.copyWith(color: muted)),
+            const SizedBox(height: Gap.sm),
+            memories.when(
+              loading: () => const LoadingBlock(height: 60),
+              error: (e, _) => StatusMessage.error(errorMessage(e), onRetry: () => ref.invalidate(coachMemoriesProvider)),
+              data: (list) => list.isEmpty
+                  ? Text(
+                      'Noch nichts gespeichert. Erzähl dem Coach von Deiner Saisonphase, Vorlieben oder Einschränkungen, '
+                      'er merkt sich das Wichtige von allein.',
+                      style: t.textTheme.bodyMedium?.copyWith(color: muted),
+                    )
+                  : Column(
+                      children: [
+                        for (final m in list)
+                          Container(
+                            margin: const EdgeInsets.only(bottom: Gap.sm),
+                            padding: const EdgeInsets.only(left: Gap.md),
+                            decoration: BoxDecoration(
+                              color: t.colorScheme.surfaceContainer.withValues(alpha: 0.6),
+                              borderRadius: BorderRadius.circular(Radii.md),
+                            ),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 12, right: Gap.sm),
+                                  child: Icon(Icons.auto_awesome, size: 16, color: t.colorScheme.primary),
+                                ),
+                                Expanded(
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(vertical: 10),
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(m.text, style: t.textTheme.bodyMedium),
+                                        if (m.validUntil != null)
+                                          Text(
+                                            'gilt bis ${DateFormat('d. MMMM yyyy', 'de').format(m.validUntil!)}',
+                                            style: t.textTheme.labelSmall?.copyWith(color: muted),
+                                          ),
+                                      ],
+                                    ),
                                   ),
                                 ),
-                              ),
-                              IconButton(
-                                tooltip: 'Vergessen',
-                                onPressed: () => _forget(context, ref, m),
-                                icon: const Icon(Icons.close_rounded, size: 18),
-                              ),
-                            ],
+                                IconButton(
+                                  tooltip: 'Vergessen',
+                                  onPressed: () => _forget(m),
+                                  icon: const Icon(Icons.close_rounded, size: 18),
+                                ),
+                              ],
+                            ),
                           ),
-                        ),
-                    ],
-                  ),
-          ),
+                      ],
+                    ),
+            ),
+          ],
         ],
       ),
     );

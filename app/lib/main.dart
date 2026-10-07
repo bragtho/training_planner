@@ -23,6 +23,17 @@ class TrainingApp extends ConsumerWidget {
       debugShowCheckedModeBanner: false,
       theme: buildTheme(Brightness.light),
       darkTheme: buildTheme(Brightness.dark),
+      builder: (context, child) {
+        final width = MediaQuery.sizeOf(context).width;
+        if (width >= compactWidth || child == null) return child ?? const SizedBox.shrink();
+        // Handy: Schrift nicht groesser als normal und etwas kleiner, Bedienelemente verdichtet
+        final media = MediaQuery.of(context);
+        final scale = (media.textScaler.scale(14) / 14 * 0.92).clamp(0.8, 1.0).toDouble();
+        return MediaQuery(
+          data: media.copyWith(textScaler: TextScaler.linear(scale)),
+          child: Theme(data: compactTheme(Theme.of(context)), child: child),
+        );
+      },
     );
   }
 }

@@ -51,6 +51,20 @@ Future<void> _load(WidgetTester tester, Widget w) async {
   }
 }
 
+/// Tippt in der Leistungskurve auf den Punkt mit dem gegebenen Index (wie ein Tipp auf den Graphen).
+Future<void> _pickDuration(WidgetTester tester, int index) async {
+  final data = tester.widget<LineChart>(find.byType(LineChart).first).data;
+  final bar = data.lineBarsData.first;
+  data.lineTouchData.touchCallback!(
+    FlTapUpEvent(TapUpDetails(kind: PointerDeviceKind.touch)),
+    LineTouchResponse(
+      touchLocation: Offset.zero,
+      touchChartCoordinate: Offset.zero,
+      lineBarSpots: [TouchLineBarSpot(bar, 0, bar.spots[index], 0)],
+    ),
+  );
+}
+
 void main() {
   setUpAll(() => initializeDateFormatting('de'));
 
@@ -65,7 +79,7 @@ void main() {
 
   testWidgets('Dauer waehlen hebt den Abschnitt in den Graphen und auf der Karte hervor', (tester) async {
     await _load(tester, _screen());
-    await tester.tap(find.text('5 min · 320 W'));
+    await _pickDuration(tester, 2); // 5 min
     await tester.pump(const Duration(milliseconds: 100));
     expect(find.textContaining('Beste 5 min: 320 W, von 5:00 bis 10:00'), findsOneWidget);
     expect(find.text('Hervorgehoben: beste 5 min'), findsOneWidget);
@@ -79,7 +93,7 @@ void main() {
   testWidgets('Zoom zeigt in den Diagrammen nur den Abschnitt und laesst sich zuruecknehmen', (tester) async {
     await _load(tester, _screen());
     expect(find.text('Auf Abschnitt zoomen'), findsNothing); // ohne Auswahl kein Zoom
-    await tester.tap(find.text('5 min · 320 W'));
+    await _pickDuration(tester, 2); // 5 min
     await tester.pump(const Duration(milliseconds: 100));
     List<LineChartData> datas() => tester.widgetList<LineChart>(find.byType(LineChart)).skip(1).map((c) => c.data).toList(); // ohne Leistungskurve
     expect(datas().where((d) => d.minX == 3.0), isEmpty);

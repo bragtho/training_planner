@@ -10,7 +10,6 @@ import '../../core/ui.dart';
 import 'highlight.dart';
 
 const _axisDurations = {5, 60, 300, 1200, 3600, 10800};
-const _chipDurations = [5, 60, 300, 1200, 3600];
 
 /// Fahrzeit als Uhr: 1:05:30 oder 12:40.
 String formatClock(int s) {
@@ -73,16 +72,11 @@ class _Body extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final t = Theme.of(context);
     final cs = ChartStyle(context);
     const color = AppColors.power;
     final spots = [for (var i = 0; i < points.length; i++) FlSpot(i.toDouble(), (points[i]['watts'] as num).toDouble())];
     final maxW = spots.map((s) => s.y).reduce((a, b) => a > b ? a : b);
     final sel = _selectedIndex;
-    final chips = [
-      for (var i = 0; i < points.length; i++)
-        if (_chipDurations.contains(_dur(i))) i,
-    ];
 
     return SurfaceCard(
       child: Column(
@@ -169,20 +163,6 @@ class _Body extends StatelessWidget {
                 ),
               ),
             ),
-          ),
-          const SizedBox(height: Gap.md),
-          Wrap(
-            spacing: Gap.sm,
-            runSpacing: Gap.sm,
-            children: [
-              for (final i in chips)
-                ChoiceChip(
-                  label: Text('${shortDuration(_dur(i))} · ${(points[i]['watts'] as num).round()} W'),
-                  selected: sel == i,
-                  onSelected: (_) => _toggle(i),
-                  labelStyle: t.textTheme.labelMedium,
-                ),
-            ],
           ),
           if (sel != null) ...[
             const SizedBox(height: Gap.md),

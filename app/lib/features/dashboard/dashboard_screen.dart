@@ -64,11 +64,12 @@ class DashboardScreen extends ConsumerWidget {
 
 /// Zwei Spalten auf breiten Bildschirmen, sonst untereinander.
 class _Columns extends StatelessWidget {
-  const _Columns({required this.left, required this.right, this.leftFlex = 3, this.rightFlex = 2});
+  const _Columns({required this.left, required this.right, this.leftFlex = 3, this.rightFlex = 2, this.equalHeight = false});
   final Widget left;
   final Widget right;
   final int leftFlex;
   final int rightFlex;
+  final bool equalHeight;
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
@@ -83,14 +84,16 @@ class _Columns extends StatelessWidget {
           ],
         );
       }
-      return Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      final row = Row(
+        crossAxisAlignment: equalHeight ? CrossAxisAlignment.stretch : CrossAxisAlignment.start,
         children: [
           Expanded(flex: leftFlex, child: left),
           const SizedBox(width: Gap.md),
           Expanded(flex: rightFlex, child: right),
         ],
       );
+      // Beide Karten gleich hoch, damit unter der kuerzeren keine Luecke bleibt (nur fuer Karten ohne LayoutBuilder/Diagramm)
+      return equalHeight ? StretchScope(child: IntrinsicHeight(child: row)) : row;
     },
   );
 }
@@ -112,9 +115,11 @@ class _Overview extends StatelessWidget {
       children: [
         _FormHero(tsb: tsb, ctl: ctl, atl: atl, ctlDelta: ctl - weekAgo('ctl'), atlDelta: atl - weekAgo('atl')),
         const SizedBox(height: Gap.md),
-        const _Columns(leftFlex: 1, rightFlex: 1, left: TodayCard(), right: WeekCard()),
+        const _Columns(leftFlex: 1, rightFlex: 1, equalHeight: true, left: TodayCard(), right: WeekCard()),
         const SizedBox(height: Gap.md),
-        _Columns(leftFlex: 3, rightFlex: 2, left: _PmcCard(rows: rows), right: const _RecentActivities()),
+        _PmcCard(rows: rows),
+        const SizedBox(height: Gap.xl),
+        const _RecentActivities(),
       ],
     );
   }
@@ -544,6 +549,7 @@ class _TssBadge extends StatelessWidget {
 }
 
 /// Die drei letzten Fahrten mit Ueberschrift des Coach-Feedbacks; alle weiteren stehen im Kalender.
+/// Breit nebeneinander in gleich hohen Karten, schmal untereinander.
 class _RecentActivities extends ConsumerWidget {
   const _RecentActivities();
 
@@ -561,13 +567,28 @@ class _RecentActivities extends ConsumerWidget {
         acts.when(
           loading: () => const LoadingBlock(height: 80),
           error: (e, _) => StatusMessage.error(errorMessage(e), onRetry: () => ref.invalidate(activitiesProvider)),
-          data: (list) => list.isEmpty
-              ? const SurfaceCard(child: Text('Noch keine Aktivitäten importiert.'))
-              : Column(
-                  children: [
-                    for (final a in list.take(3)) ...[ActivityTile(a: a), const SizedBox(height: Gap.sm)],
-                  ],
-                ),
+          data: (list) {
+            if (list.isEmpty) return const SurfaceCard(child: Text('Noch keine Aktivitäten importiert.'));
+            final tiles = [for (final a in list.take(3)) ActivityTile(a: a)];
+            return LayoutBuilder(
+              builder: (context, c) {
+                if (c.maxWidth < 860) {
+                  return Column(children: [for (final t in tiles) ...[t, const SizedBox(height: Gap.sm)]]);
+                }
+                return IntrinsicHeight(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      for (var i = 0; i < 3; i++) ...[
+                        if (i > 0) const SizedBox(width: Gap.md),
+                        Expanded(child: i < tiles.length ? tiles[i] : const SizedBox.shrink()),
+                      ],
+                    ],
+                  ),
+                );
+              },
+            );
+          },
         ),
       ],
     );

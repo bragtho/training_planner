@@ -8,6 +8,17 @@ import '../../core/data.dart';
 import '../../core/theme.dart';
 import '../../core/ui.dart';
 
+/// Sagt Karten, dass sie auf die Hoehe der Nachbarkarte gestreckt werden; der Inhalt verteilt sich dann (Hauptinhalt oben,
+/// Profil oder Knopf unten), statt unten eine Luecke zu lassen.
+class StretchScope extends InheritedWidget {
+  const StretchScope({super.key, required super.child});
+
+  static bool of(BuildContext context) => context.dependOnInheritedWidgetOfExactType<StretchScope>() != null;
+
+  @override
+  bool updateShouldNotify(StretchScope oldWidget) => false;
+}
+
 /// Die Karte der Uebersicht, die zuerst beantwortet: Was steht heute an (oder war schon)?
 /// Heute absolviert: die Fahrt mit der Ueberschrift des Coach-Feedbacks. Sonst das geplante Training von heute,
 /// sonst das naechste der kommenden 14 Tage. Ohne Plan ein Hinweis zum Coach.
@@ -61,7 +72,7 @@ class _Frame extends StatelessWidget {
     final t = Theme.of(context);
     return SurfaceCard(
       onTap: onTap,
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      child: Column(mainAxisSize: MainAxisSize.max, crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           Container(
             padding: const EdgeInsets.all(6),
@@ -73,7 +84,7 @@ class _Frame extends StatelessWidget {
           if (onTap != null) Icon(Icons.chevron_right_rounded, color: t.colorScheme.onSurfaceVariant),
         ]),
         const SizedBox(height: Gap.md),
-        child,
+        if (StretchScope.of(context)) Expanded(child: child) else child,
       ]),
     );
   }
@@ -101,17 +112,19 @@ class _Planned extends StatelessWidget {
       icon: isToday ? Icons.today_rounded : Icons.event_rounded,
       color: isToday ? AppColors.tsb : t.colorScheme.primary,
       onTap: () => context.push('/workout/${w['id']}'),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(w['title'] as String, style: t.textTheme.titleLarge, maxLines: 2, overflow: TextOverflow.ellipsis),
-        const SizedBox(height: 2),
-        Text(
-          [
-            if (!isToday) when,
-            if (w['planned_duration_s'] != null) formatDuration(w['planned_duration_s'] as num),
-            if (w['planned_tss'] != null) '${(w['planned_tss'] as num).round()} TSS',
-          ].join(' · '),
-          style: t.textTheme.bodyMedium?.copyWith(color: t.colorScheme.onSurfaceVariant),
-        ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+        Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(w['title'] as String, style: t.textTheme.titleLarge, maxLines: 2, overflow: TextOverflow.ellipsis),
+          const SizedBox(height: 2),
+          Text(
+            [
+              if (!isToday) when,
+              if (w['planned_duration_s'] != null) formatDuration(w['planned_duration_s'] as num),
+              if (w['planned_tss'] != null) '${(w['planned_tss'] as num).round()} TSS',
+            ].join(' · '),
+            style: t.textTheme.bodyMedium?.copyWith(color: t.colorScheme.onSurfaceVariant),
+          ),
+        ]),
         if (structure != null && structure.isNotEmpty) ...[
           const SizedBox(height: Gap.md),
           WorkoutProfile(structure: structure, height: 54),
@@ -136,33 +149,37 @@ class _Done extends StatelessWidget {
       icon: Icons.check_circle_rounded,
       color: AppColors.completed,
       onTap: () => context.push('/activity/${activity['id']}'),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(activity['name'] as String? ?? 'Fahrt', style: t.textTheme.titleLarge, maxLines: 2, overflow: TextOverflow.ellipsis),
-        const SizedBox(height: 2),
-        Text(
-          [
-            formatDuration(activity['duration_s'] as num),
-            formatKm(activity['distance_m'] as num),
-            if (tss != null) '${tss.round()} TSS',
-          ].join(' · '),
-          style: t.textTheme.bodyMedium?.copyWith(color: t.colorScheme.onSurfaceVariant),
-        ),
-        const SizedBox(height: Gap.md),
-        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Icon(Icons.auto_awesome, size: 16, color: t.colorScheme.primary),
-          const SizedBox(width: Gap.sm),
-          Expanded(
-            child: Text(
-              headline ?? 'Feedback Deines Coaches ansehen',
-              style: t.textTheme.bodyMedium?.copyWith(color: t.colorScheme.primary, fontWeight: FontWeight.w600),
-            ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+        Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(activity['name'] as String? ?? 'Fahrt', style: t.textTheme.titleLarge, maxLines: 2, overflow: TextOverflow.ellipsis),
+          const SizedBox(height: 2),
+          Text(
+            [
+              formatDuration(activity['duration_s'] as num),
+              formatKm(activity['distance_m'] as num),
+              if (tss != null) '${tss.round()} TSS',
+            ].join(' · '),
+            style: t.textTheme.bodyMedium?.copyWith(color: t.colorScheme.onSurfaceVariant),
           ),
         ]),
-        if (planned != null) ...[
-          const SizedBox(height: Gap.sm),
-          Text('Noch geplant: ${planned!['title']}',
-              style: t.textTheme.bodySmall?.copyWith(color: t.colorScheme.onSurfaceVariant)),
-        ],
+        const SizedBox(height: Gap.md),
+        Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Icon(Icons.auto_awesome, size: 16, color: t.colorScheme.primary),
+            const SizedBox(width: Gap.sm),
+            Expanded(
+              child: Text(
+                headline ?? 'Feedback Deines Coaches ansehen',
+                style: t.textTheme.bodyMedium?.copyWith(color: t.colorScheme.primary, fontWeight: FontWeight.w600),
+              ),
+            ),
+          ]),
+          if (planned != null) ...[
+            const SizedBox(height: Gap.sm),
+            Text('Noch geplant: ${planned!['title']}',
+                style: t.textTheme.bodySmall?.copyWith(color: t.colorScheme.onSurfaceVariant)),
+          ],
+        ]),
       ]),
     );
   }
@@ -178,16 +195,21 @@ class _Empty extends StatelessWidget {
       overline: 'Training',
       icon: Icons.event_available_rounded,
       color: t.colorScheme.outline,
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text('Nichts geplant', style: t.textTheme.titleLarge),
-        const SizedBox(height: 2),
-        Text('Lass Dir vom Coach die nächste Woche planen.',
-            style: t.textTheme.bodyMedium?.copyWith(color: t.colorScheme.onSurfaceVariant)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+        Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Nichts geplant', style: t.textTheme.titleLarge),
+          const SizedBox(height: 2),
+          Text('Lass Dir vom Coach die nächste Woche planen.',
+              style: t.textTheme.bodyMedium?.copyWith(color: t.colorScheme.onSurfaceVariant)),
+        ]),
         const SizedBox(height: Gap.md),
-        OutlinedButton.icon(
-          onPressed: () => context.go('/coach'),
-          icon: const Icon(Icons.auto_awesome_outlined, size: 18),
-          label: const Text('Zum Coach'),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: OutlinedButton.icon(
+            onPressed: () => context.go('/coach'),
+            icon: const Icon(Icons.auto_awesome_outlined, size: 18),
+            label: const Text('Zum Coach'),
+          ),
         ),
       ]),
     );

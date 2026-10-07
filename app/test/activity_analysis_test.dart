@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:training_planner/core/data.dart';
 import 'package:training_planner/features/activity/activity_analysis.dart';
-import 'package:training_planner/features/dashboard/load_ftp_cards.dart';
+import 'package:training_planner/features/dashboard/load_style.dart';
 
 const _feedback = <String, dynamic>{
   'headline': 'Intervalle sauber getroffen',
@@ -94,43 +94,6 @@ void main() {
     expect(find.textContaining('Leistungsabfall'), findsOneWidget);
     expect(find.text('5 min  305 W'), findsOneWidget);
     expect(find.byIcon(Icons.emoji_events_rounded), findsOneWidget);
-  });
-
-  testWidgets('Belastungskarte nutzt die Einordnung des Coaches', (tester) async {
-    await tester.pumpWidget(_app(const LoadCard(), overrides: [
-      loadCheckProvider.overrideWith((ref) async => {
-            'verdict': 'too_little',
-            'flags': [
-              {'code': 'ctl_falling', 'level': 'warn', 'text': 'Die Fitness sinkt.', 'kind': 'too_little'},
-            ],
-            'metrics': {'ramp_7d': -4.2, 'tss_7d': 120},
-            'context': {'planned_tss_14d': 0, 'actual_tss_14d': 300, 'season_phase': 'Übergang'},
-            'coach': {'verdict': 'ok', 'text': 'Die Pause ist gewollt.'},
-          }),
-    ]));
-    await tester.pump();
-    expect(find.text('Passend'), findsOneWidget);
-    expect(find.text('Die Pause ist gewollt.'), findsOneWidget);
-    expect(find.text('Die Fitness sinkt.'), findsNothing);
-    expect(find.text('CTL -4.2 / Woche'), findsOneWidget);
-  });
-
-  testWidgets('FTP-Vorschlag bietet das Übernehmen an', (tester) async {
-    await tester.pumpWidget(_app(const FtpCard(), overrides: [
-      ftpCheckProvider.overrideWith((ref) async => {
-            'ftp': 260,
-            'recommendation': 'raise',
-            'suggested_ftp': 285,
-            'reason': 'Die besten 20 min ergeben etwa 285 W.',
-            'best_efforts': {
-              '20 min': {'watts': 300, 'date': '2026-10-01'},
-            },
-          }),
-    ]));
-    await tester.pump();
-    expect(find.text('FTP anheben?'), findsOneWidget);
-    expect(find.text('Auf 285 W setzen'), findsOneWidget);
-    expect(find.text('20 min  300 W'), findsOneWidget);
   });
 
   test('Farben und Beschriftungen der Urteile', () {

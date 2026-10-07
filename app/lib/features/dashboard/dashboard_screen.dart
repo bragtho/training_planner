@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,14 +9,9 @@ import '../../core/charts.dart';
 import '../../core/data.dart';
 import '../../core/theme.dart';
 import '../../core/ui.dart';
-import 'load_ftp_cards.dart';
-
-DateTime _today() {
-  final n = DateTime.now();
-  return DateTime(n.year, n.month, n.day);
-}
-
-DateTime _monday(DateTime d) => DateTime(d.year, d.month, d.day - (d.weekday - 1));
+import 'load_style.dart';
+import 'today_card.dart';
+import 'week_card.dart';
 
 class DashboardScreen extends ConsumerWidget {
   const DashboardScreen({super.key});
@@ -33,8 +26,7 @@ class DashboardScreen extends ConsumerWidget {
         ..invalidate(activitiesProvider)
         ..invalidate(calendarProvider)
         ..invalidate(formHintProvider)
-        ..invalidate(loadCheckProvider)
-        ..invalidate(ftpCheckProvider);
+        ..invalidate(loadCheckProvider);
       await ref.read(pmcProvider.future);
     }
 
@@ -72,11 +64,12 @@ class DashboardScreen extends ConsumerWidget {
 
 /// Zwei Spalten auf breiten Bildschirmen, sonst untereinander.
 class _Columns extends StatelessWidget {
-  const _Columns({required this.left, required this.right, this.leftFlex = 3, this.rightFlex = 2});
+  const _Columns({required this.left, required this.right, this.leftFlex = 3, this.rightFlex = 2, this.equalHeight = false});
   final Widget left;
   final Widget right;
   final int leftFlex;
   final int rightFlex;
+  final bool equalHeight;
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
@@ -91,14 +84,16 @@ class _Columns extends StatelessWidget {
           ],
         );
       }
-      return Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      final row = Row(
+        crossAxisAlignment: equalHeight ? CrossAxisAlignment.stretch : CrossAxisAlignment.start,
         children: [
           Expanded(flex: leftFlex, child: left),
           const SizedBox(width: Gap.md),
           Expanded(flex: rightFlex, child: right),
         ],
       );
+      // Beide Karten gleich hoch, damit unter der kuerzeren keine Luecke bleibt (nur fuer Karten ohne LayoutBuilder/Diagramm)
+      return equalHeight ? StretchScope(child: IntrinsicHeight(child: row)) : row;
     },
   );
 }
@@ -113,66 +108,18 @@ class _Overview extends StatelessWidget {
     final rows = [for (final r in data['rows'] as List) Json.from(r as Map)];
     num weekAgo(String k) => rows.length > 7 ? rows[rows.length - 8][k] as num : rows.first[k] as num;
     final ctl = cur['ctl'] as num, atl = cur['atl'] as num, tsb = cur['tsb'] as num;
-    final ramp = cur['ramp_rate'] as num?;
 
+    // Reihenfolge nach Bedeutung: Zustand, heutiges Training, Woche, danach Verlauf und letzte Fahrten
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _FormHero(tsb: tsb),
+        _FormHero(tsb: tsb, ctl: ctl, atl: atl, ctlDelta: ctl - weekAgo('ctl'), atlDelta: atl - weekAgo('atl')),
         const SizedBox(height: Gap.md),
-        ResponsiveGrid(
-          minItemWidth: MediaQuery.sizeOf(context).width < 600 ? 100 : 200,
-          children: [
-            MetricTile(
-              label: 'Fitness',
-              value: ctl.toStringAsFixed(0),
-              unit: 'CTL',
-              icon: Icons.favorite_rounded,
-              color: AppColors.ctl,
-              delta: ctl - weekAgo('ctl'),
-              caption: ramp == null
-                  ? 'Langfristige Belastung (42 Tage)'
-                  : 'Rampe ${ramp > 0 ? '+' : ''}${ramp.toStringAsFixed(1)} pro Woche',
-              help:
-                  'Fitness (Chronic Training Load): gewichteter Schnitt Deiner täglichen TSS der letzten 42 Tage. '
-                  'Steigt langsam, wenn Du regelmäßig trainierst. Eine Rampe von 3–7 pro Woche gilt als nachhaltig.',
-            ),
-            MetricTile(
-              label: 'Ermüdung',
-              value: atl.toStringAsFixed(0),
-              unit: 'ATL',
-              icon: Icons.local_fire_department_rounded,
-              color: AppColors.atl,
-              delta: atl - weekAgo('atl'),
-              caption: 'Kurzfristige Belastung (7 Tage)',
-              help:
-                  'Ermüdung (Acute Training Load): gewichteter Schnitt Deiner TSS der letzten 7 Tage. '
-                  'Reagiert schnell auf harte Einheiten und Ruhetage.',
-            ),
-            MetricTile(
-              label: 'Form',
-              value: '${tsb > 0 ? '+' : ''}${tsb.toStringAsFixed(0)}',
-              unit: 'TSB',
-              icon: Icons.speed_rounded,
-              color: AppColors.tsb,
-              delta: tsb - weekAgo('tsb'),
-              caption: 'Fitness minus Ermüdung',
-              help:
-                  'Form (Training Stress Balance) = Fitness − Ermüdung. Positiv heißt erholt, '
-                  'zwischen −10 und −30 liegt der produktive Trainingsbereich.',
-            ),
-          ],
-        ),
+        const _Columns(leftFlex: 1, rightFlex: 1, equalHeight: true, left: TodayCard(), right: WeekCard()),
         const SizedBox(height: Gap.md),
-        const _Columns(leftFlex: 1, rightFlex: 1, left: LoadCard(), right: FtpCard()),
-        const SizedBox(height: Gap.md),
-        const _SeasonCard(),
-        _Columns(
-          left: _PmcCard(rows: rows),
-          right: _WeekCard(rows: rows),
-        ),
+        _PmcCard(rows: rows),
         const SizedBox(height: Gap.xl),
-        const _Columns(leftFlex: 1, rightFlex: 1, left: _UpcomingWorkouts(), right: _RecentActivities()),
+        const _RecentActivities(),
       ],
     );
   }
@@ -180,14 +127,22 @@ class _Overview extends StatelessWidget {
 
 /// Grosse Karte, die die aktuelle Form in Worte fasst und auf einer Skala zeigt.
 class _FormHero extends ConsumerWidget {
-  const _FormHero({required this.tsb});
+  const _FormHero({required this.tsb, required this.ctl, required this.atl, this.ctlDelta, this.atlDelta});
   final num tsb;
+  final num ctl;
+  final num atl;
+  final num? ctlDelta;
+  final num? atlDelta;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final t = Theme.of(context);
     final s = FormStatus.of(tsb);
     final hint = ref.watch(formHintProvider);
+    final load = ref.watch(loadCheckProvider).value;
+    final verdict = ((load?['coach'] as Map?)?['verdict'] ?? load?['verdict']) as String?;
+    final loadText = (load?['coach'] as Map?)?['text'] as String?;
+    final warn = verdict == 'too_much' || verdict == 'slightly_much';
     return Card(
       clipBehavior: Clip.antiAlias,
       child: Container(
@@ -228,9 +183,37 @@ class _FormHero extends ConsumerWidget {
                 ),
                 const SizedBox(height: Gap.md),
                 _Advice(fallback: s.advice, hint: hint),
+                if (warn && loadText != null) ...[
+                  const SizedBox(height: Gap.md),
+                  Container(
+                    padding: const EdgeInsets.all(Gap.md),
+                    decoration: BoxDecoration(
+                      color: loadVerdictStyle(verdict).$2.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(Radii.md),
+                    ),
+                    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Icon(loadVerdictStyle(verdict).$3, size: 18, color: loadVerdictStyle(verdict).$2),
+                      const SizedBox(width: Gap.sm),
+                      Expanded(child: Text(loadText, style: t.textTheme.bodyMedium)),
+                    ]),
+                  ),
+                ],
               ],
             );
-            final gauge = _FormGauge(tsb: tsb);
+            final chips = Wrap(spacing: Gap.sm, runSpacing: Gap.sm, children: [
+              Pill(label: 'Fitness ${ctl.round()}${_trend(ctlDelta)}', color: AppColors.ctl, icon: Icons.favorite_rounded),
+              Pill(label: 'Ermüdung ${atl.round()}${_trend(atlDelta)}', color: AppColors.atl, icon: Icons.local_fire_department_rounded),
+              if (verdict != null)
+                Pill(
+                  label: 'Belastung: ${loadVerdictStyle(verdict).$1}',
+                  color: loadVerdictStyle(verdict).$2,
+                  icon: loadVerdictStyle(verdict).$3,
+                ),
+            ]);
+            final gauge = Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [_FormGauge(tsb: tsb), const SizedBox(height: Gap.md), chips],
+            );
             if (c.maxWidth < 640) {
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -255,6 +238,9 @@ class _FormHero extends ConsumerWidget {
     );
   }
 }
+
+/// Veraenderung gegenueber der Vorwoche als Zahl mit Vorzeichen (Pfeile fehlen in manchen Schriften).
+String _trend(num? d) => d == null || d.abs() < 1 ? '' : '  ${d > 0 ? '+' : '−'}${d.abs().round()}';
 
 /// Hinweis zur Form: Text vom Coach (kennt Gespraech und Ziele), sonst der Standardtext.
 /// Waehrend des Ladens ein Platzhalter, damit kurz keine unpassende Standardmeldung steht.
@@ -541,254 +527,6 @@ class _PmcChart extends StatelessWidget {
   }
 }
 
-/// Aktuelle Woche (Plan vs. Ist) und TSS der letzten Wochen als Balken.
-class _WeekCard extends ConsumerWidget {
-  const _WeekCard({required this.rows});
-  final List<Json> rows;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final t = Theme.of(context);
-    final monday = _monday(_today());
-    final data = ref.watch(calendarProvider((monday, monday.add(const Duration(days: 6))))).value;
-    if (data == null) return const LoadingBlock(height: 360);
-
-    var planned = 0.0, done = 0.0, secs = 0.0, meters = 0.0, rides = 0;
-    for (final w in data['workouts'] as List) {
-      if ((w as Map)['status'] != 'skipped') planned += ((w['planned_tss'] as num?) ?? 0).toDouble();
-    }
-    for (final a in data['activities'] as List) {
-      done += (((a as Map)['tss'] as num?) ?? 0).toDouble();
-      secs += (a['duration_s'] as num).toDouble();
-      meters += (a['distance_m'] as num).toDouble();
-      rides++;
-    }
-    final progress = planned > 0 ? (done / planned).clamp(0.0, 1.0) : (done > 0 ? 1.0 : 0.0);
-
-    return SurfaceCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SectionHeader(
-            title: 'Diese Woche',
-            subtitle:
-                '${DateFormat('d. MMM', 'de').format(monday)} – ${DateFormat('d. MMM', 'de').format(monday.add(const Duration(days: 6)))}',
-          ),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
-            children: [
-              Text(done.round().toString(), style: t.textTheme.headlineLarge),
-              const SizedBox(width: 6),
-              Text(
-                planned > 0 ? 'von ${planned.round()} TSS' : 'TSS',
-                style: t.textTheme.titleSmall?.copyWith(color: t.colorScheme.onSurfaceVariant),
-              ),
-              const Spacer(),
-              if (planned > 0)
-                Text(
-                  '${(done / planned * 100).round()} %',
-                  style: t.textTheme.titleSmall?.copyWith(color: t.colorScheme.primary),
-                ),
-            ],
-          ),
-          const SizedBox(height: Gap.sm),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(Radii.pill),
-            child: LinearProgressIndicator(
-              value: progress,
-              minHeight: 10,
-              backgroundColor: t.colorScheme.surfaceContainerHigh,
-            ),
-          ),
-          const SizedBox(height: Gap.lg),
-          Row(
-            children: [
-              _MiniStat(icon: Icons.schedule_rounded, value: formatDuration(secs), label: 'Zeit'),
-              _MiniStat(icon: Icons.route_rounded, value: formatKm(meters), label: 'Distanz'),
-              _MiniStat(icon: Icons.directions_bike_rounded, value: '$rides', label: 'Fahrten'),
-            ],
-          ),
-          const SizedBox(height: Gap.xl),
-          Text('TSS pro Woche', style: t.textTheme.labelMedium?.copyWith(color: t.colorScheme.onSurfaceVariant)),
-          const SizedBox(height: Gap.sm),
-          SizedBox(height: 120, child: _WeeklyBars(rows: rows)),
-        ],
-      ),
-    );
-  }
-}
-
-class _MiniStat extends StatelessWidget {
-  const _MiniStat({required this.icon, required this.value, required this.label});
-  final IconData icon;
-  final String value;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = Theme.of(context);
-    return Expanded(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, size: 18, color: t.colorScheme.onSurfaceVariant),
-          const SizedBox(height: 4),
-          Text(value, style: t.textTheme.titleSmall, maxLines: 1, overflow: TextOverflow.ellipsis),
-          Text(label, style: t.textTheme.labelSmall?.copyWith(color: t.colorScheme.onSurfaceVariant)),
-        ],
-      ),
-    );
-  }
-}
-
-class _WeeklyBars extends StatelessWidget {
-  const _WeeklyBars({required this.rows});
-  final List<Json> rows;
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = ChartStyle(context);
-    final thisMonday = _monday(_today());
-    final weeks = List.generate(8, (i) => thisMonday.subtract(Duration(days: 7 * (7 - i))));
-    final sums = List.filled(8, 0.0);
-    for (final r in rows) {
-      final d = DateTime.parse(r['date'] as String);
-      final idx = weeks.indexOf(_monday(d));
-      if (idx >= 0) sums[idx] += (r['tss'] as num).toDouble();
-    }
-    final maxY = math.max(50.0, sums.reduce(math.max) * 1.15);
-    return BarChart(
-      BarChartData(
-        maxY: maxY,
-        gridData: const FlGridData(show: false),
-        borderData: FlBorderData(show: false),
-        titlesData: FlTitlesData(
-          topTitles: const AxisTitles(),
-          rightTitles: const AxisTitles(),
-          leftTitles: const AxisTitles(),
-          bottomTitles: AxisTitles(
-            sideTitles: SideTitles(
-              showTitles: true,
-              reservedSize: 22,
-              getTitlesWidget: (v, _) => cs.axisLabel('KW ${isoWeek(weeks[v.toInt()])}'),
-            ),
-          ),
-        ),
-        barTouchData: BarTouchData(
-          touchTooltipData: BarTouchTooltipData(
-            getTooltipColor: (_) => cs.tooltipColor(),
-            tooltipBorderRadius: cs.tooltipRadius,
-            fitInsideHorizontally: true,
-            getTooltipItem: (g, _, rod, _) =>
-                BarTooltipItem('${rod.toY.round()} TSS', cs.tooltipText(cs.scheme.primary)),
-          ),
-        ),
-        barGroups: [
-          for (var i = 0; i < 8; i++)
-            BarChartGroupData(
-              x: i,
-              barRods: [
-                BarChartRodData(
-                  toY: sums[i],
-                  width: 18,
-                  color: i == 7 ? cs.scheme.primary : cs.scheme.primary.withValues(alpha: 0.35),
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(6)),
-                  backDrawRodData: BackgroundBarChartRodData(show: true, toY: maxY, color: cs.scheme.surfaceContainer),
-                ),
-              ],
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Geplante Trainings der naechsten 7 Tage.
-class _UpcomingWorkouts extends ConsumerWidget {
-  const _UpcomingWorkouts();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final today = _today();
-    final data = ref.watch(calendarProvider((today, today.add(const Duration(days: 7)))));
-    final upcoming = [
-      for (final w in (data.value?['workouts'] as List?) ?? const [])
-        if ((w as Map)['status'] == 'planned') Json.from(w),
-    ];
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        SectionHeader(
-          title: 'Nächste Trainings',
-          subtitle: 'Geplant für die kommenden 7 Tage',
-          trailing: TextButton(onPressed: () => context.go('/calendar'), child: const Text('Kalender')),
-        ),
-        if (data.isLoading && data.value == null)
-          const LoadingBlock(height: 80)
-        else if (upcoming.isEmpty)
-          SurfaceCard(
-            child: Row(
-              children: [
-                Icon(Icons.event_available_rounded, color: Theme.of(context).colorScheme.outline),
-                const SizedBox(width: Gap.md),
-                const Expanded(child: Text('Nichts geplant. Lass Dir vom Coach eine Woche planen.')),
-                TextButton(onPressed: () => context.go('/coach'), child: const Text('Coach')),
-              ],
-            ),
-          )
-        else
-          for (final w in upcoming) ...[_WorkoutTile(w: w, today: today), const SizedBox(height: Gap.sm)],
-      ],
-    );
-  }
-}
-
-class _WorkoutTile extends StatelessWidget {
-  const _WorkoutTile({required this.w, required this.today});
-  final Json w;
-  final DateTime today;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = Theme.of(context);
-    final date = DateTime.parse(w['date'] as String);
-    final diff = date.difference(today).inDays;
-    final when = diff == 0
-        ? 'Heute'
-        : diff == 1
-        ? 'Morgen'
-        : DateFormat('EEEE', 'de').format(date);
-    return SurfaceCard(
-      padding: const EdgeInsets.all(Gap.md),
-      onTap: () => context.push('/workout/${w['id']}'),
-      child: Row(
-        children: [
-          DateBadge(date: date, color: diff == 0 ? AppColors.tsb : null),
-          const SizedBox(width: Gap.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(w['title'] as String, style: t.textTheme.titleSmall, maxLines: 1, overflow: TextOverflow.ellipsis),
-                const SizedBox(height: 2),
-                Text(
-                  [
-                    when,
-                    if (w['planned_duration_s'] != null) formatDuration(w['planned_duration_s'] as num),
-                  ].join(' · '),
-                  style: t.textTheme.bodySmall?.copyWith(color: t.colorScheme.onSurfaceVariant),
-                ),
-              ],
-            ),
-          ),
-          if (w['planned_tss'] != null) _TssBadge(tss: w['planned_tss'] as num),
-        ],
-      ),
-    );
-  }
-}
-
 class _TssBadge extends StatelessWidget {
   const _TssBadge({required this.tss, this.color});
   final num tss;
@@ -810,6 +548,8 @@ class _TssBadge extends StatelessWidget {
   }
 }
 
+/// Die drei letzten Fahrten mit Ueberschrift des Coach-Feedbacks; alle weiteren stehen im Kalender.
+/// Breit nebeneinander in gleich hohen Karten, schmal untereinander.
 class _RecentActivities extends ConsumerWidget {
   const _RecentActivities();
 
@@ -819,17 +559,36 @@ class _RecentActivities extends ConsumerWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const SectionHeader(title: 'Letzte Aktivitäten', subtitle: 'Farbe zeigt die Intensität (IF)'),
+        SectionHeader(
+          title: 'Letzte Fahrten',
+          subtitle: 'Mit Feedback Deines Coaches',
+          trailing: TextButton(onPressed: () => context.go('/calendar'), child: const Text('Kalender')),
+        ),
         acts.when(
           loading: () => const LoadingBlock(height: 80),
           error: (e, _) => StatusMessage.error(errorMessage(e), onRetry: () => ref.invalidate(activitiesProvider)),
-          data: (list) => list.isEmpty
-              ? const SurfaceCard(child: Text('Noch keine Aktivitäten importiert.'))
-              : Column(
-                  children: [
-                    for (final a in list.take(10)) ...[ActivityTile(a: a), const SizedBox(height: Gap.sm)],
-                  ],
-                ),
+          data: (list) {
+            if (list.isEmpty) return const SurfaceCard(child: Text('Noch keine Aktivitäten importiert.'));
+            final tiles = [for (final a in list.take(3)) ActivityTile(a: a)];
+            return LayoutBuilder(
+              builder: (context, c) {
+                if (c.maxWidth < 860) {
+                  return Column(children: [for (final t in tiles) ...[t, const SizedBox(height: Gap.sm)]]);
+                }
+                return IntrinsicHeight(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      for (var i = 0; i < 3; i++) ...[
+                        if (i > 0) const SizedBox(width: Gap.md),
+                        Expanded(child: i < tiles.length ? tiles[i] : const SizedBox.shrink()),
+                      ],
+                    ],
+                  ),
+                );
+              },
+            );
+          },
         ),
       ],
     );
@@ -881,6 +640,21 @@ class ActivityTile extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: t.textTheme.bodySmall?.copyWith(color: t.colorScheme.onSurfaceVariant),
                 ),
+                if ((a['feedback_headline'] as String?)?.isNotEmpty ?? false) ...[
+                  const SizedBox(height: 2),
+                  Row(children: [
+                    Icon(Icons.auto_awesome, size: 12, color: t.colorScheme.primary),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        a['feedback_headline'] as String,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: t.textTheme.bodySmall?.copyWith(color: t.colorScheme.primary),
+                      ),
+                    ),
+                  ]),
+                ],
               ],
             ),
           ),
@@ -888,181 +662,6 @@ class ActivityTile extends StatelessWidget {
           if (a['tss'] != null) _TssBadge(tss: a['tss'] as num, color: c),
         ],
       ),
-    );
-  }
-}
-
-/// Saisonplan auf einen Blick: aktuelle Phase mit Wochenziel und das naechste Event; ohne Plan ein Hinweis.
-class _SeasonCard extends ConsumerWidget {
-  const _SeasonCard();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final data = ref.watch(atpProvider(seasonRange())).value;
-    if (data == null) return const SizedBox.shrink();
-    final t = Theme.of(context);
-    final muted = t.colorScheme.onSurfaceVariant;
-    final weeks = [for (final w in data['weeks'] as List) Json.from(w as Map)];
-    final events = [for (final e in data['events'] as List) Json.from(e as Map)]
-        .where((e) => (e['days_to_go'] as int) >= 0)
-        .toList();
-    final curKey = isoDay(mondayOf(DateTime.now()));
-    final cur = weeks.where((w) => w['week_start'] == curKey && w['phase'] != null).firstOrNull;
-    final next = events.where((e) => e['priority'] == 'A').firstOrNull ?? events.firstOrNull;
-    final pad = const SizedBox(height: Gap.md);
-
-    if (cur == null && next == null) {
-      if (weeks.any((w) => w['phase'] != null)) return const SizedBox.shrink();
-      return Column(
-        children: [
-          SurfaceCard(
-            onTap: () => context.push('/season'),
-            child: Row(
-              children: [
-                Icon(Icons.timeline_rounded, color: t.colorScheme.primary),
-                const SizedBox(width: Gap.md),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Saisonplan anlegen', style: t.textTheme.titleSmall),
-                      Text(
-                        'Nenne dem Coach Deine Events, er plant die Saison rückwärts vom Hauptziel.',
-                        style: t.textTheme.bodySmall?.copyWith(color: muted),
-                      ),
-                    ],
-                  ),
-                ),
-                const Icon(Icons.chevron_right_rounded),
-              ],
-            ),
-          ),
-          pad,
-        ],
-      );
-    }
-
-    final phase = cur?['phase'] as String?;
-    final target = (cur?['tss_target'] as num?)?.toDouble();
-    final actual = ((cur?['actual_tss'] as num?) ?? 0).toDouble();
-    final left = cur == null
-        ? Text('Kein Plan für diese Woche', style: t.textTheme.bodyMedium?.copyWith(color: muted))
-        : Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Wrap(
-                spacing: Gap.sm,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  Pill(label: Phases.label(phase), color: Phases.color(phase)),
-                  if (cur['recovery'] == true) const Pill(label: 'Entlastung', color: AppColors.completed),
-                ],
-              ),
-              const SizedBox(height: Gap.md),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.baseline,
-                textBaseline: TextBaseline.alphabetic,
-                children: [
-                  Text('${actual.round()}', style: t.textTheme.headlineSmall),
-                  const SizedBox(width: 4),
-                  Text('von ${target?.round()} TSS diese Woche', style: t.textTheme.bodySmall?.copyWith(color: muted)),
-                ],
-              ),
-              const SizedBox(height: Gap.sm),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(Radii.pill),
-                child: LinearProgressIndicator(
-                  value: target == null || target == 0 ? 0 : (actual / target).clamp(0.0, 1.0),
-                  minHeight: 8,
-                  color: Phases.color(phase),
-                  backgroundColor: t.colorScheme.surfaceContainerHigh,
-                ),
-              ),
-            ],
-          );
-    final right = next == null
-        ? null
-        : Row(
-            children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: EventPriority.color(next['priority'] as String),
-                  borderRadius: BorderRadius.circular(Radii.md),
-                ),
-                child: const Icon(Icons.flag_rounded, color: Colors.white),
-              ),
-              const SizedBox(width: Gap.md),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      next['name'] as String,
-                      style: t.textTheme.titleSmall,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    Text(
-                      [
-                        '${next['priority']}-Event in ${next['days_to_go']} Tagen',
-                        if (next['form_tsb'] != null)
-                          'Form laut Plan ${(next['form_tsb'] as num) > 0 ? '+' : ''}${(next['form_tsb'] as num).round()}',
-                      ].join(' · '),
-                      style: t.textTheme.bodySmall?.copyWith(color: muted),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          );
-    return Column(
-      children: [
-        SurfaceCard(
-          onTap: () => context.push('/season'),
-          child: LayoutBuilder(
-            builder: (context, c) {
-              final header = Row(
-                children: [
-                  Icon(Icons.timeline_rounded, size: 18, color: t.colorScheme.primary),
-                  const SizedBox(width: Gap.sm),
-                  Expanded(child: Text('Saisonplan', style: t.textTheme.titleMedium)),
-                  Text('Alle Phasen', style: t.textTheme.labelMedium?.copyWith(color: t.colorScheme.primary)),
-                  Icon(Icons.chevron_right_rounded, size: 18, color: t.colorScheme.primary),
-                ],
-              );
-              if (right == null || c.maxWidth < 560) {
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    header,
-                    pad,
-                    left,
-                    if (right != null) ...[pad, right],
-                  ],
-                );
-              }
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  header,
-                  pad,
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      Expanded(child: left),
-                      const SizedBox(width: Gap.xl),
-                      Expanded(child: right),
-                    ],
-                  ),
-                ],
-              );
-            },
-          ),
-        ),
-        pad,
-      ],
     );
   }
 }

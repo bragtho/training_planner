@@ -392,7 +392,8 @@ def _median(xs: list[float]) -> float:
     return ys[n // 2] if n % 2 else (ys[n // 2 - 1] + ys[n // 2]) / 2
 
 
-def ftp_assessment(ftp: float, rides: list[dict], today: dt.date, ctl_by_date: dict[dt.date, float] | None = None) -> dict:
+def ftp_assessment(ftp: float, rides: list[dict], today: dt.date, ctl_by_date: dict[dt.date, float] | None = None,
+                   recent_days: int = 42) -> dict:
     """Passt die eingestellte FTP? rides: [{date, name, duration_s, np, mmp: {sek: watt} | None}] der letzten 90 Tage.
 
     Schaetzer (Praxisregeln): 95 % der besten 20 min, 97 % der besten 30 min, beste 60 min, NP der haertesten langen Fahrt,
@@ -444,22 +445,25 @@ def ftp_assessment(ftp: float, rides: list[dict], today: dt.date, ctl_by_date: d
     cp90 = critical_power({d: v[0] for d, v in best90.items()})
     if cp90:
         out["critical_power"] = cp90
-    recent = candidates(42)
-    older = [e for e in candidates(90) if e["source"] != "cp" and (e["age_days"] or 0) > 42]
+    recent = candidates(recent_days)
+    older = [e for e in candidates(90) if e["source"] != "cp" and (e["age_days"] or 0) > recent_days]
     out["evidence"] = sorted(recent, key=lambda e: -e["estimate"]) + older[:2]
     strong = [e for e in recent if e["source"] in ("mmp_1200", "mmp_1800", "mmp_3600", "np_long_ride")]
+    window = "6 Wochen" if recent_days == 42 else f"{recent_days} Tage"
     if not strong:
         out.update(recommendation="test", confidence="low",
-                   reason="In den letzten 6 Wochen gab es keine langen, harten Belastungen; die FTP ist nicht bestaetigt. "
+                   reason=f"In den letzten {window} gab es keine langen, harten Belastungen; die FTP ist nicht bestaetigt. "
                           "Ein FTP-Test oder ein Rennen wuerde sie pruefen.")
         return out
     ests = [e["estimate"] for e in recent]
     estimate = round(_median(ests))
     spread = (max(ests) - min(ests)) / estimate if estimate else 1
     out["estimate"] = estimate
+    out["estimators"] = len(ests)
+    out["spread"] = round(spread, 3)
     if max(e["estimate"] for e in strong) < ftp * 0.92:
         out.update(recommendation="test", confidence="low",
-                   reason=f"Die haertesten Belastungen der letzten 6 Wochen ergeben nur etwa {estimate} W; das kann an fehlenden "
+                   reason=f"Die haertesten Belastungen der letzten {window} ergeben nur etwa {estimate} W; das kann an fehlenden "
                           "Maximalbelastungen liegen. Ein FTP-Test zeigt, ob die eingestellte FTP noch stimmt.")
         return out
     if estimate >= ftp * 1.03 and estimate - ftp >= 5:
@@ -475,9 +479,47 @@ def ftp_assessment(ftp: float, rides: list[dict], today: dt.date, ctl_by_date: d
         top3 = ", ".join(e["detail"] for e in sorted(recent, key=lambda e: -e["estimate"])[:3])
         out.update(recommendation="raise", suggested_ftp=int(round(estimate / 5) * 5),
                    confidence="high" if len(ests) >= 2 and spread <= 0.08 and estimate >= ftp * 1.05 else "medium",
-                   reason=f"Die Belastungen der letzten 6 Wochen ergeben im Mittel etwa {estimate} W ({top3}), "
+                   reason=f"Die Belastungen der letzten {window} ergeben im Mittel etwa {estimate} W ({top3}), "
                           f"mehr als die eingestellten {ftp:.0f} W.")
         return out
     out.update(recommendation="ok", confidence="medium" if len(ests) >= 2 else "low",
                reason=f"Die harten Belastungen der letzten Wochen ergeben etwa {estimate} W und passen zur eingestellten FTP.")
     return out
+
+
+AUTO_MIN_GAIN = 0.03  # mindestens 3 % ueber der eingestellten FTP
+AUTO_MIN_WATTS = 5
+AUTO_MAX_STEP = 0.05  # hoechstens +5 % je Schritt
+AUTO_COOLDOWN_DAYS = 14  # seit der letzten automatischen Aenderung
+AUTO_MANUAL_PAUSE_DAYS = 28  # nach manueller Aenderung oder Rueckgaengig
+AUTO_MAX_SPREAD = 0.08  # Schaetzer duerfen hoechstens 8 % auseinanderliegen
+
+
+def ftp_auto_decision(ftp: float, assessment: dict, *, today: dt.date, last_auto: dt.date | None = None,
+                      last_manual: dt.date | None = None, phase_now: str | None = None) -> dict:
+    """Soll der Coach die FTP jetzt selbst anheben? assessment: Ergebnis von ftp_assessment mit recent_days=14.
+
+    Nur anheben, nur bei klarer Datenlage: Empfehlung raise, mindestens zwei uebereinstimmende Schaetzer aus den letzten
+    14 Tagen, mindestens +3 % und +5 W, hoechstens +5 % je Schritt, Pausen nach eigener und manueller Aenderung,
+    nicht in der Uebergangsphase des Saisonplans. Senken passiert nie automatisch.
+    """
+    def no(why: str) -> dict:
+        return {"apply": False, "why": why}
+
+    if assessment.get("recommendation") != "raise":
+        return no(f"Empfehlung ist {assessment.get('recommendation')}")
+    if phase_now == "transition":
+        return no("Uebergangsphase im Saisonplan")
+    if last_auto and (today - last_auto).days < AUTO_COOLDOWN_DAYS:
+        return no("zuletzt vor weniger als 14 Tagen angepasst")
+    if last_manual and (today - last_manual).days < AUTO_MANUAL_PAUSE_DAYS:
+        return no("kuerzlich manuell geaendert oder rueckgaengig gemacht")
+    est = assessment.get("estimate") or 0
+    if (assessment.get("estimators") or 0) < 2 or (assessment.get("spread") or 1) > AUTO_MAX_SPREAD:
+        return no("Datenlage nicht klar genug: zu wenige oder zu weit auseinanderliegende Schaetzer")
+    if est < ftp * (1 + AUTO_MIN_GAIN) or est - ftp < AUTO_MIN_WATTS:
+        return no("Anstieg zu klein")
+    new = min(int(round(est / 5) * 5), int(ftp * (1 + AUTO_MAX_STEP) // 5 * 5))
+    if new <= ftp:
+        return no("Schritt nach Begrenzung nicht groesser als die FTP")
+    return {"apply": True, "new_ftp": new, "estimate": est, "capped": new < int(round(est / 5) * 5)}

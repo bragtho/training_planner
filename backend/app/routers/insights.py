@@ -64,9 +64,6 @@ class FtpIn(BaseModel):
 @router.post("/metrics/ftp-check/accept")
 def accept_ftp(body: FtpIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     """Uebernimmt eine neue FTP (Vorschlag der Pruefung) und berechnet TSS, IF und Analysen neu."""
-    p = db.merge(user.profile)
-    old = p.ftp
-    p.ftp = round(body.ftp)
-    db.commit()
-    user.profile = p
-    return {"old_ftp": old, "ftp": p.ftp, "recomputed": I.recompute_tss(db, user)}
+    old = user.profile.ftp
+    I.set_ftp(db, user, body.ftp, source="user", reason="Vorschlag der FTP-Pruefung uebernommen")
+    return {"old_ftp": old, "ftp": user.profile.ftp, "recomputed": I.recompute_tss(db, user)}

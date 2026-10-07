@@ -91,6 +91,20 @@ class ActivityInsight(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
 
+class FtpChange(Base):
+    """Aenderung der FTP mit Quelle und Begruendung: coach (automatisch), user (manuell) oder undo (rueckgaengig gemacht)."""
+
+    __tablename__ = "ftp_changes"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)
+    old_ftp: Mapped[float] = mapped_column(Float)
+    new_ftp: Mapped[float] = mapped_column(Float)
+    source: Mapped[str] = mapped_column(String(10))  # coach | user | undo
+    reason: Mapped[str | None] = mapped_column(String(500))
+    evidence: Mapped[list | None] = mapped_column(JSON)
+
+
 class PlannedWorkout(Base):
     __tablename__ = "planned_workouts"
     id: Mapped[int] = mapped_column(primary_key=True)

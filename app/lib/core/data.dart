@@ -149,9 +149,3 @@ final loadCheckProvider = FutureProvider.autoDispose<Json>((ref) async {
       queryParameters: {'coach': true}, options: Options(receiveTimeout: const Duration(minutes: 1)));
   return Json.from(r.data as Map);
 });
-
-/// Pruefung, ob die eingestellte FTP zu den Leistungen der letzten Wochen passt.
-final ftpCheckProvider = FutureProvider.autoDispose<Json>((ref) async {
-  final r = await ref.watch(apiProvider).dio.get('/metrics/ftp-check');
-  return Json.from(r.data as Map);
-});

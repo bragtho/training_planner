@@ -23,7 +23,9 @@ from .integrations import strava
 from .metrics import analysis as AN
 from .metrics.fitness import pmc_rows
 from .metrics.power import POWER_ZONES
-from .models import Activity, ActivityInsight, AtpWeek, Integration, PlannedWorkout, SeasonEvent, User
+from .metrics.workout import Leaf, Repeat, summarize
+from .models import (Activity, ActivityInsight, AtpWeek, CoachMessage, FtpChange, Integration, PlannedWorkout, SeasonEvent,
+                     User)
 from .routers.plans import calendar_data
 
 log = logging.getLogger(__name__)
@@ -323,7 +325,7 @@ def backfill_streams(db: Session, user: User, limit: int = BACKFILL_DEFAULT, tod
     return n
 
 
-def ftp_report(db: Session, user: User, today: dt.date | None = None, *, backfill: int = 0) -> dict:
+def ftp_report(db: Session, user: User, today: dt.date | None = None, *, backfill: int = 0, recent_days: int = 42) -> dict:
     today = today or dt.date.today()
     loaded = backfill_streams(db, user, backfill, today) if backfill else 0
     acts = [a for a in _acts_since(db, user, today - dt.timedelta(days=89)) if a.avg_power]
@@ -333,7 +335,11 @@ def ftp_report(db: Session, user: User, today: dt.date | None = None, *, backfil
         rides.append({"date": a.start_time.date(), "name": a.name, "duration_s": a.duration_s, "np": a.norm_power,
                       "mmp": (m or {}).get("mmp")})
     ctl_by_date = {r["date"]: r["ctl"] for r in pmc_rows(db, user.id, today) if (today - r["date"]).days <= 90}
-    res = AN.ftp_assessment(user.profile.ftp, rides, today, ctl_by_date)
+    res = AN.ftp_assessment(user.profile.ftp, rides, today, ctl_by_date, recent_days)
+    last = last_ftp_change(db, user.id)
+    if last:
+        res["last_change"] = {"date": last.changed_at.date().isoformat(), "old_ftp": last.old_ftp, "new_ftp": last.new_ftp,
+                              "source": last.source, "reason": last.reason}
     res["rides_with_power_90d"] = len(rides)
     res["rides_with_sensor_data_90d"] = sum(1 for r in rides if r["mmp"])
     if loaded:
@@ -574,3 +580,124 @@ def coach_load_view(db: Session, user: User, report: dict, *, client: Any = None
     view = {"verdict": data["verdict"], "text": str(data["text"]).strip()[:400]}
     _load_cache[user.id] = (key, view)
     return view
+
+
+# ------------------------------------------------------------ FTP-Aenderungen ---
+
+UNDO_LOCK_DAYS = AN.AUTO_MANUAL_PAUSE_DAYS
+
+
+def last_ftp_change(db: Session, user_id: int) -> FtpChange | None:
+    return db.scalar(select(FtpChange).where(FtpChange.user_id == user_id).order_by(FtpChange.id.desc()).limit(1))
+
+
+def _last_change_date(db: Session, user_id: int, *sources: str) -> dt.date | None:
+    row = db.scalar(select(FtpChange).where(FtpChange.user_id == user_id, FtpChange.source.in_(sources))
+                    .order_by(FtpChange.id.desc()).limit(1))
+    return row.changed_at.date() if row else None
+
+
+def refresh_planned(db: Session, user_id: int, ftp: float, today: dt.date | None = None) -> int:
+    """TSS und Dauer kuenftiger geplanter Trainings mit Struktur nach einer FTP-Aenderung neu berechnen."""
+    today = today or dt.date.today()
+    n = 0
+    for w in db.scalars(select(PlannedWorkout).where(PlannedWorkout.user_id == user_id, PlannedWorkout.date >= today,
+                                                     PlannedWorkout.structure.is_not(None))):
+        try:
+            steps = [Repeat(**x) if x.get("type") == "repeat" else Leaf(**x) for x in w.structure]
+        except (TypeError, ValueError):
+            continue
+        summary = summarize(steps, ftp)
+        w.planned_tss, w.planned_duration_s = summary["tss"], summary["duration_s"]
+        n += 1
+    return n
+
+
+def set_ftp(db: Session, user: User, new_ftp: float, *, source: str, reason: str | None = None,
+            evidence: list | None = None) -> FtpChange | None:
+    """Setzt die FTP und haelt die Aenderung fest. Kuenftige Trainings werden neu berechnet, bisherige Fahrten behalten ihre Werte."""
+    p = db.merge(user.profile)
+    old = p.ftp
+    if round(new_ftp) == round(old):
+        return None
+    p.ftp = float(round(new_ftp))
+    row = FtpChange(user_id=user.id, old_ftp=old, new_ftp=p.ftp, source=source, reason=(reason or "")[:500] or None, evidence=evidence)
+    db.add(row)
+    user.profile = p
+    refresh_planned(db, user.id, p.ftp)
+    db.commit()
+    return row
+
+
+def ftp_change_view(db: Session, user_id: int, today: dt.date | None = None) -> dict | None:
+    """Letzte automatische Aenderung der letzten 30 Tage, solange der Athlet sie nicht selbst ueberholt hat (fuer das Profil)."""
+    today = today or dt.date.today()
+    last = last_ftp_change(db, user_id)
+    if last is None or last.source != "coach" or (today - last.changed_at.date()).days > 30:
+        return None
+    return {"date": last.changed_at.date().isoformat(), "old_ftp": last.old_ftp, "new_ftp": last.new_ftp,
+            "reason": last.reason, "can_undo": True}
+
+
+def undo_ftp(db: Session, user: User) -> FtpChange:
+    last = last_ftp_change(db, user.id)
+    if last is None or last.source != "coach":
+        raise InsightError("Es gibt keine automatische FTP-Aenderung zum Rueckgaengigmachen", 409)
+    row = set_ftp(db, user, last.old_ftp, source="undo", reason="Rueckgaengig gemacht; automatische Anhebungen ruhen 28 Tage")
+    return row
+
+
+def _ftp_message(old: float, new: float, report: dict, capped: bool) -> str:
+    evidence = [e["detail"] for e in report.get("evidence", []) if e.get("age_days") is not None and e["age_days"] <= 14][:3]
+    why = "; ".join(evidence) if evidence else "Deine letzten harten Fahrten"
+    text = (f"Ich habe Deine FTP von {old:.0f} auf {new:.0f} W angehoben. Grund: {why}. "
+            f"Das liegt deutlich ueber der bisherigen FTP.")
+    if capped:
+        text += " Ich gehe bewusst nur in einem Schritt von hoechstens 5 % hoch; wenn sich das bestaetigt, folgt der naechste Schritt."
+    text += (" Zonen und Wattvorgaben kuenftiger Trainings sind angepasst, bisherige Fahrten behalten ihre alten Werte. "
+             "Passt das nicht, kannst Du es im Profil rueckgaengig machen.")
+    return text
+
+
+def auto_adjust_ftp(user_id: int, *, today: dt.date | None = None) -> dict | None:
+    """Hebt die FTP an, wenn die Datenlage klar ist (Regeln in analysis.ftp_auto_decision). Eigene DB-Sitzung (Hintergrundaufgabe).
+
+    Schreibt eine Nachricht des Coaches in den Chat. Senken passiert nie automatisch."""
+    today = today or dt.date.today()
+    with SessionLocal() as db:
+        user = db.get(User, user_id)
+        if user is None:
+            return None
+        try:
+            report = ftp_report(db, user, today, backfill=3, recent_days=14)
+            week = db.scalar(select(AtpWeek).where(AtpWeek.user_id == user.id, AtpWeek.week_start == A.monday_of(today)))
+            decision = AN.ftp_auto_decision(
+                user.profile.ftp, report, today=today, last_auto=_last_change_date(db, user.id, "coach"),
+                last_manual=_last_change_date(db, user.id, "user", "undo"), phase_now=week.phase if week else None)
+            if not decision["apply"]:
+                log.info("FTP nicht automatisch angepasst (Nutzer %s): %s", user_id, decision["why"])
+                return None
+            old = user.profile.ftp
+            top3 = "; ".join(e["detail"] for e in report["evidence"] if e.get("age_days") is not None and e["age_days"] <= 14)[:480]
+            row = set_ftp(db, user, decision["new_ftp"], source="coach", reason=top3 or "Harte Fahrten der letzten 14 Tage",
+                          evidence=report.get("evidence"))
+            if row is None:
+                return None
+            db.add(CoachMessage(user_id=user.id, role="assistant", content={
+                "text": _ftp_message(old, row.new_ftp, report, decision["capped"]),
+                "actions": [f"FTP angehoben: {old:.0f} auf {row.new_ftp:.0f} W"], "model": "regel", "sources": []}))
+            db.commit()
+            return {"old_ftp": old, "new_ftp": row.new_ftp}
+        except Exception:  # Hintergrund darf nie abstuerzen
+            log.exception("Automatische FTP-Anpassung fuer Nutzer %s fehlgeschlagen", user_id)
+            db.rollback()
+            return None
+
+
+def after_import(user_id: int, activity_ids: list[int]) -> None:
+    """Nach dem Import neuer Fahrten: Feedback erzeugen, danach die FTP pruefen (Sensordaten liegen dann vor)."""
+    try:
+        auto_feedback(user_id, activity_ids)
+    finally:
+        if activity_ids:
+            auto_adjust_ftp(user_id)

@@ -6,6 +6,7 @@ import '../../core/auth.dart';
 import '../../core/data.dart';
 import '../../core/theme.dart';
 import '../../core/ui.dart';
+import 'ftp_change_card.dart';
 import 'memory_card.dart';
 import 'strava_card.dart';
 
@@ -21,14 +22,15 @@ class ProfileScreen extends ConsumerWidget {
         error: (e, _) => Center(
           child: StatusMessage.error(errorMessage(e), onRetry: () => ref.invalidate(profileProvider)),
         ),
-        data: (p) => _ProfileForm(initial: p),
+        // Neuer Schluessel bei FTP-Aenderung (z. B. Rueckgaengig), damit das Formular den neuen Wert zeigt
+        data: (p) => _ProfileForm(key: ValueKey(p['ftp']), initial: p),
       ),
     );
   }
 }
 
 class _ProfileForm extends ConsumerStatefulWidget {
-  const _ProfileForm({required this.initial});
+  const _ProfileForm({super.key, required this.initial});
   final Map<String, dynamic> initial;
 
   @override
@@ -156,6 +158,10 @@ class _ProfileFormState extends ConsumerState<_ProfileForm> {
         LayoutBuilder(builder: (context, c) {
           final form = _buildForm(context);
           final side = Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            if (widget.initial['ftp_change'] != null) ...[
+              FtpChangeCard(change: Json.from(widget.initial['ftp_change'] as Map)),
+              const SizedBox(height: Gap.md),
+            ],
             const StravaCard(),
             const SizedBox(height: Gap.md),
             const CoachMemoryCard(),

@@ -9,7 +9,7 @@ from ..db import get_db
 from ..integrations import strava
 from ..metrics.fitness import current_status, pmc_rows
 from ..metrics.power import intensity_factor, tss
-from ..models import Activity, Integration, User
+from ..models import Activity, ActivityInsight, Integration, User
 from ..security import current_user
 
 router = APIRouter(tags=["activities"])
@@ -32,6 +32,7 @@ class ActivityOut(BaseModel):
     intensity_factor: float | None
     tss: float | None
     has_streams: bool
+    feedback_headline: str | None = None
 
 
 def _out(a: Activity) -> ActivityOut:
@@ -61,7 +62,16 @@ def list_activities(
         .limit(min(max(limit, 1), 200))
         .offset(max(offset, 0))
     )
-    return [_out(a) for a in rows]
+    acts = list(rows)
+    headlines = dict(db.execute(select(ActivityInsight.activity_id, ActivityInsight.feedback)
+                                .where(ActivityInsight.activity_id.in_([a.id for a in acts]),
+                                       ActivityInsight.feedback.is_not(None))).all()) if acts else {}
+    out = []
+    for a in acts:
+        o = _out(a)
+        o.feedback_headline = (headlines.get(a.id) or {}).get("headline")
+        out.append(o)
+    return out
 
 
 @router.get("/activities/{activity_id}", response_model=ActivityOut)

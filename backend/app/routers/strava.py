@@ -80,7 +80,7 @@ def sync(background: BackgroundTasks, full: bool = False, user: User = Depends(c
     except strava.StravaError as e:
         raise HTTPException(e.status if e.status in (401, 429) else 502, str(e))
     # Coach-Feedback fuer frische Fahrten im Hintergrund (nur die letzten Tage, nicht die ganze Historie)
-    background.add_task(insights.auto_feedback, user.id, result.get("new_ids", []))
+    background.add_task(insights.after_import, user.id, result.get("new_ids", []))
     return result
 
 
@@ -134,5 +134,5 @@ async def webhook_event(request: Request, background: BackgroundTasks, db: Sessi
             Integration.provider == "strava", Integration.external_user_id == str(event.get("owner_id")),
             Activity.source == "strava", Activity.external_id == str(event.get("object_id"))))
         if act is not None:  # Feedback erst nach der Antwort an Strava erzeugen
-            background.add_task(insights.auto_feedback, act.user_id, [act.id])
+            background.add_task(insights.after_import, act.user_id, [act.id])
     return PlainTextResponse(result)

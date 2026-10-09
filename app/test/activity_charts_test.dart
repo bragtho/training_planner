@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -58,7 +56,7 @@ Widget _screen({bool gps = true, List<Json>? laps, String? sport, num? tss}) => 
       return {'time': t, 'watts': [for (final x in t) x == 400 ? 900 : 320]};
     }),
     profileProvider.overrideWith((ref) async => {'ftp': 300}),
-    activityAnalysisProvider(1).overrideWith((ref) => Completer<Json>().future), // Feedback gehoert nicht zu diesem Test
+    activityAnalysisProvider(1).overrideWith((ref) async => {'coach_configured': false}), // Feedback gehoert nicht zu diesem Test
   ],
   child: const MaterialApp(home: ActivityScreen(id: 1)),
 );
@@ -110,13 +108,13 @@ void main() {
 
   testWidgets('Andere Sportarten: Sportart und hrTSS statt Radauswertung', (tester) async {
     await _load(tester, _screen(sport: 'Run', tss: 55));
-    expect(find.byType(ActivityAnalysisSection), findsNothing);
+    expect(find.byType(CoachFeedbackCard), findsNothing);
     expect(find.text('Laufen'), findsOneWidget);
     expect(find.text('hrTSS'), findsOneWidget);
     expect(find.text('TSS'), findsNothing);
     await tester.pumpWidget(const SizedBox()); // neue ProviderScope statt Wiederverwendung
     await _load(tester, _screen(sport: 'Ride', tss: 55));
-    expect(find.byType(ActivityAnalysisSection), findsOneWidget);
+    expect(find.byType(CoachFeedbackCard), findsOneWidget);
     expect(find.text('Laufen'), findsNothing);
   });
 

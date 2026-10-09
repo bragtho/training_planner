@@ -157,16 +157,13 @@ class _ProfileFormState extends ConsumerState<_ProfileForm> {
         const SizedBox(height: Gap.md),
         LayoutBuilder(builder: (context, c) {
           final form = _buildForm(context);
-          final side = Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            if (widget.initial['ftp_change'] != null) ...[
-              FtpChangeCard(change: Json.from(widget.initial['ftp_change'] as Map)),
-              const SizedBox(height: Gap.md),
-            ],
-            const StravaCard(),
-            const SizedBox(height: Gap.md),
-            const CoachMemoryCard(),
-            const SizedBox(height: Gap.md),
-            _ZonesCard(zones: zones),
+          // Von oben nach unten laden, damit die Karten darunter nicht verrutschen
+          final side = TopDown(sections: [
+            if (widget.initial['ftp_change'] != null)
+              TopDownSection(ready: true, child: FtpChangeCard(change: Json.from(widget.initial['ftp_change'] as Map))),
+            TopDownSection(ready: loaded(ref.watch(stravaStatusProvider)), placeholder: 80, child: const StravaCard()),
+            TopDownSection(ready: loaded(ref.watch(coachMemoriesProvider)), placeholder: 80, child: const CoachMemoryCard()),
+            TopDownSection(ready: true, child: _ZonesCard(zones: zones)),
           ]);
           if (c.maxWidth < 820) {
             return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [

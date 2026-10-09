@@ -18,7 +18,7 @@ class TrainingApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return MaterialApp.router(
-      title: 'Training Planner',
+      title: 'Wattlab',
       routerConfig: ref.watch(routerProvider),
       debugShowCheckedModeBanner: false,
       theme: buildTheme(Brightness.light),

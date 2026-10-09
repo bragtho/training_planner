@@ -2,9 +2,8 @@ import 'package:flutter/material.dart';
 
 /// Farben mit fester Bedeutung, in hellem und dunklem Modus gleich.
 abstract final class AppColors {
-  static const brand = Color(0xFF0FA968);
-  static const brandDeep = Color(0xFF0B7A55);
-  static const accent = Color(0xFF3B82F6);
+  static const brand = Color(0xFF13294B); // Navy, wie das App-Icon
+  static const accent = Color(0xFFFF7A45); // Orange, wie die Balken im App-Icon
 
   static const ctl = Color(0xFF3B82F6); // Fitness
   static const atl = Color(0xFFEC4899); // Ermuedung
@@ -170,8 +169,8 @@ ThemeData compactTheme(ThemeData t) {
 ThemeData buildTheme(Brightness b) {
   final dark = b == Brightness.dark;
   final scheme = ColorScheme.fromSeed(seedColor: AppColors.brand, brightness: b).copyWith(
-    primary: dark ? const Color(0xFF34D399) : AppColors.brandDeep,
-    onPrimary: dark ? const Color(0xFF052E1F) : Colors.white,
+    primary: dark ? const Color(0xFF8DB4FF) : const Color(0xFF1B3A6B),
+    onPrimary: dark ? const Color(0xFF0B1730) : Colors.white,
     surface: dark ? const Color(0xFF0E1116) : const Color(0xFFF4F6F8),
     surfaceContainerLowest: dark ? const Color(0xFF0A0D11) : Colors.white,
     surfaceContainerLow: dark ? const Color(0xFF151A21) : Colors.white,

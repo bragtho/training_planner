@@ -250,7 +250,7 @@ class _AthleteCard extends StatelessWidget {
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [AppColors.brandDeep, Color(0xFF1E3A8A)],
+            colors: [AppColors.brand, Color(0xFF1E3A8A)],
           ),
         ),
         padding: const EdgeInsets.all(Gap.xl),

@@ -35,7 +35,17 @@ class DashboardScreen extends ConsumerWidget {
       body: PageBody(
         onRefresh: refresh,
         children: [
-          PageHeader(subtitle: DateFormat('EEEE, d. MMMM', 'de').format(DateTime.now()), title: greeting()),
+          PageHeader(
+            subtitle: DateFormat('EEEE, d. MMMM', 'de').format(DateTime.now()),
+            title: greeting(),
+            trailing: [
+              OutlinedButton.icon(
+                onPressed: () => context.push('/bests'),
+                icon: const Icon(Icons.emoji_events_outlined, size: 18),
+                label: const Text('Bestwerte'),
+              ),
+            ],
+          ),
           pmc.when(
             loading: () => const Column(
               children: [

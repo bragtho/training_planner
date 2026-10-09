@@ -170,7 +170,7 @@ class _WorkoutEditorScreenState extends ConsumerState<WorkoutEditorScreen> {
     try {
       await ref.read(apiProvider).dio.delete('/workouts/${widget.id}');
       ref.invalidate(calendarProvider);
-      if (mounted) _close();
+      if (mounted) context.go('/calendar');
     } catch (e) {
       if (mounted) _toast(errorMessage(e));
     }
@@ -324,9 +324,9 @@ class _WorkoutEditorScreenState extends ConsumerState<WorkoutEditorScreen> {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         const SectionHeader(title: 'Profil', subtitle: 'Leistung in % der FTP, Farbe = Zone'),
-                        SizedBox(height: 170, child: _Preview(structure: _structure())),
+                        SizedBox(height: 170, child: WorkoutProfile(structure: _structure())),
                         const SizedBox(height: Gap.lg),
-                        _Summary(summary: _summary),
+                        WorkoutSummary(summary: _summary),
                       ],
                     ),
                   ),
@@ -438,15 +438,15 @@ class _PresetCard extends StatelessWidget {
         children: [
           Text(name, style: Theme.of(context).textTheme.labelLarge, maxLines: 1, overflow: TextOverflow.ellipsis),
           const SizedBox(height: Gap.sm),
-          Expanded(child: _Preview(structure: steps, mini: true)),
+          Expanded(child: WorkoutProfile(structure: steps, mini: true)),
         ],
       ),
     ),
   );
 }
 
-class _Summary extends StatelessWidget {
-  const _Summary({required this.summary});
+class WorkoutSummary extends StatelessWidget {
+  const WorkoutSummary({super.key, required this.summary});
   final Json? summary;
 
   @override
@@ -700,8 +700,8 @@ List<_Seg> _segments(List<Map<String, dynamic>> structure) {
 }
 
 /// Blockprofil des Workouts; jede Stufe in der Farbe ihrer Leistungszone.
-class _Preview extends StatelessWidget {
-  const _Preview({required this.structure, this.mini = false});
+class WorkoutProfile extends StatelessWidget {
+  const WorkoutProfile({super.key, required this.structure, this.mini = false});
   final List<Map<String, dynamic>>? structure;
   final bool mini;
 

@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -111,6 +112,28 @@ class SectionHeader extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Chips in einer Zeile, die seitlich scrollt (Touch, Maus ziehen, Trackpad) statt umzubrechen.
+class ChipRow extends StatelessWidget {
+  const ChipRow({super.key, required this.children});
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) => ScrollConfiguration(
+    behavior: ScrollConfiguration.of(context).copyWith(
+      scrollbars: false,
+      dragDevices: {PointerDeviceKind.touch, PointerDeviceKind.mouse, PointerDeviceKind.trackpad, PointerDeviceKind.stylus},
+    ),
+    child: SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          for (var i = 0; i < children.length; i++) ...[if (i > 0) const SizedBox(width: Gap.sm), children[i]],
+        ],
+      ),
+    ),
+  );
 }
 
 /// Karte mit feinem Rahmen; optional antippbar.

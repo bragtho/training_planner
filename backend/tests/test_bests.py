@@ -50,6 +50,7 @@ def test_bests_period_and_level():
     assert e[60]["wkg"] == pytest.approx(4.29, abs=0.01) and e[60]["level"] == "hobby"
     old = c.get("/metrics/bests?durations=60&end=2026-06-30", headers=h).json()["efforts"]
     assert old[0]["watts"] == 200
+    assert len(e[60]["thresholds"]) == 4 and e[300]["thresholds"][3] == 6.8
     assert c.get("/metrics/bests?durations=0", headers=h).status_code == 422
 
 

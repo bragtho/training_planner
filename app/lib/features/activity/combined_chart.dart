@@ -72,7 +72,7 @@ class _CombinedChartState extends State<CombinedChart> {
           title: 'Alle Daten in einem Diagramm',
           subtitle: 'Jede Reihe ist auf ihren eigenen Bereich skaliert. Die echten Werte zeigt die Anzeige beim Berühren.',
         ),
-        Wrap(spacing: Gap.sm, runSpacing: Gap.sm, children: [
+        ChipRow(children: [
           for (final s in widget.series)
             FilterChip(
               avatar: Icon(s.icon, size: 16, color: _shown.contains(s.key) ? s.color : t.colorScheme.onSurfaceVariant),

@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session, defer
 
 from ..db import get_db
 from ..integrations import strava
-from ..metrics.bests import LEVEL_LABELS, classify
+from ..metrics.bests import LEVEL_LABELS, classify, thresholds
 from ..metrics.power import mean_max_curve
 from ..metrics.sports import is_cycling
 from ..models import Activity, User
@@ -70,7 +70,9 @@ def bests(
         level = classify(d, wkg) if wkg else None
         out.append({
             "duration_s": d, "watts": round(p["watts"]), "wkg": round(wkg, 2) if wkg else None,
-            "level": level, "level_label": LEVEL_LABELS.get(level), "date": a.start_time.date().isoformat(),
+            "level": level, "level_label": LEVEL_LABELS.get(level),
+            "thresholds": [round(x, 2) for x in thresholds(d) or ()] or None,  # Mindest-W/kg: Amateur..Worldtour
+            "date": a.start_time.date().isoformat(),
             "activity_id": a.id, "activity_name": a.name, "start_s": p["start_s"],
         })
     return {"weight_kg": weight, "ftp": user.profile.ftp, "efforts": out}

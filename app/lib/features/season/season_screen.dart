@@ -984,9 +984,7 @@ class _WeekSheetState extends ConsumerState<_WeekSheet> {
             const SizedBox(height: Gap.lg),
             Text('Phase', style: t.textTheme.labelLarge),
             const SizedBox(height: Gap.sm),
-            Wrap(
-              spacing: Gap.sm,
-              runSpacing: Gap.sm,
+            ChipRow(
               children: [
                 for (final k in Phases.all.keys)
                   ChoiceChip(

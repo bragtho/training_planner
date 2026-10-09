@@ -561,3 +561,25 @@ def test_coach_creates_strength_workout():
         assert w.structure[0]["name"] == "Kniebeuge" and w.structure[1]["duration_s"] == 45
     assert r["actions"] == ["1 Training(s) angelegt"]
     assert "Krafttraining" in agent.SYSTEM_PROMPT
+
+
+def test_heat_flag_is_set_by_coach_and_survives_edits():
+    fake = FakeClient(
+        msg(tool("a", "create_workouts", workouts=[{"date": TOMORROW, "title": "Hitze 1/5", "planned_duration_s": 3600,
+                                                    "planned_tss": 40, "heat": True}]), stop="tool_use"),
+        msg(text("ok")),
+    )
+    with SessionLocal() as db:
+        u = make_user(db)
+        run(db, u, fake)
+        w = db.scalar(select(PlannedWorkout))
+        assert w.heat is True
+        # Aendern ohne heat laesst die Markierung stehen, mit heat=false nimmt sie weg
+        fake = FakeClient(msg(tool("b", "update_workout", id=w.id, title="Hitze 1/5 locker"), stop="tool_use"), msg(text("ok")))
+        run(db, u, fake)
+        db.refresh(w)
+        assert w.heat is True and w.title == "Hitze 1/5 locker"
+        fake = FakeClient(msg(tool("c", "update_workout", id=w.id, heat=False), stop="tool_use"), msg(text("ok")))
+        run(db, u, fake)
+        db.refresh(w)
+        assert w.heat is False

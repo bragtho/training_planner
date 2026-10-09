@@ -119,6 +119,7 @@ class PlannedWorkout(Base):
     status: Mapped[str] = mapped_column(String(20), default="planned")  # planned|completed|skipped
     created_by: Mapped[str] = mapped_column(String(10), default="user")  # user | coach
     wahoo_workout_id: Mapped[str | None] = mapped_column(String(64))
+    heat: Mapped[bool | None] = mapped_column(Boolean, default=False)  # Einheit eines Hitze-Blocks (Heat Acclimation)
 
 
 class CoachMessage(Base):

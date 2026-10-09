@@ -34,6 +34,7 @@ class _WorkoutEditorScreenState extends ConsumerState<WorkoutEditorScreen> {
   num? _strengthDuration;
   bool _done = false; // Krafttraining von Hand als erledigt markiert
   bool _skipped = false;
+  bool _heat = false;
   bool _loading = false;
   bool _saving = false;
   String? _loadError;
@@ -69,6 +70,7 @@ class _WorkoutEditorScreenState extends ConsumerState<WorkoutEditorScreen> {
       _desc.text = (w['description'] as String?) ?? '';
       _date = DateTime.parse(w['date'] as String);
       _skipped = w['status'] == 'skipped';
+      _heat = w['heat'] == true;
       _done = w['status'] == 'completed';
       final st = w['structure'] as List?;
       if (w['kind'] == 'strength') {
@@ -138,6 +140,7 @@ class _WorkoutEditorScreenState extends ConsumerState<WorkoutEditorScreen> {
       'title': _title.text.trim(),
       'description': _desc.text.trim().isEmpty ? null : _desc.text.trim(),
       'status': _skipped ? 'skipped' : (_strength != null && _done ? 'completed' : 'planned'),
+      'heat': _heat,
     };
     if (structure.isNotEmpty) {
       body['structure'] = structure;
@@ -276,6 +279,16 @@ class _WorkoutEditorScreenState extends ConsumerState<WorkoutEditorScreen> {
                           alignLabelWithHint: true,
                         ),
                       ),
+                      if (_strength == null) ...[
+                        const SizedBox(height: Gap.sm),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('Hitzetraining'),
+                          subtitle: const Text('Einheit eines Hitze-Blocks: Die Analyse wertet den höheren Puls nicht als Ermüdung'),
+                          value: _heat,
+                          onChanged: (v) => setState(() => _heat = v),
+                        ),
+                      ],
                       if (_isEdit && _strength != null) ...[
                         const SizedBox(height: Gap.sm),
                         SwitchListTile(

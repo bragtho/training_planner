@@ -102,6 +102,13 @@ class _WorkoutDetailScreenState extends ConsumerState<WorkoutDetailScreen> {
           style: t.textTheme.labelLarge?.copyWith(color: t.colorScheme.primary),
         ),
         Text(w['title'] as String, style: t.textTheme.headlineSmall),
+        if (w['heat'] == true) ...[
+          const SizedBox(height: Gap.sm),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Pill(label: 'Hitzetraining', color: AppColors.accent, icon: Icons.local_fire_department_rounded),
+          ),
+        ],
         if (desc != null && desc.isNotEmpty) ...[
           const SizedBox(height: Gap.sm),
           Text(desc, style: t.textTheme.bodyMedium?.copyWith(color: t.colorScheme.onSurfaceVariant)),

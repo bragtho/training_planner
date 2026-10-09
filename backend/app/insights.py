@@ -202,6 +202,9 @@ def activity_report(db: Session, user: User, act: Activity, *, fetch: bool = Tru
         quality.append("Keine Leistungsdaten (kein Powermeter): Intensitaet und TSS sind aus dem Puls geschaetzt oder fehlen.")
     if act.tss is not None and not act.avg_power:
         quality.append("TSS ist aus dem Puls geschaetzt.")
+    plan = planned_workout_for(db, user, act)
+    if plan and plan.heat:
+        quality.append("Hitzeeinheit (Heat-Block): Puls, Entkopplung und Efficiency Factor sind bei Hitze hoeher und nicht mit normalen Fahrten vergleichbar.")
     if quality:
         report["data_quality"] = quality
     if m:
@@ -209,9 +212,8 @@ def activity_report(db: Session, user: User, act: Activity, *, fetch: bool = Tru
         pbs = AN.personal_bests(m.get("mmp") or {}, _history_mmp(db, user, act))
         if pbs:
             report["personal_bests_90d"] = pbs
-    plan = planned_workout_for(db, user, act)
     if plan:
-        report["plan"] = {"title": plan.title, "description": (plan.description or "")[:600] or None,
+        report["plan"] = {"title": plan.title, "heat": bool(plan.heat), "description": (plan.description or "")[:600] or None,
                           "planned_tss": round(plan.planned_tss) if plan.planned_tss is not None else None,
                           "planned_min": round(plan.planned_duration_s / 60) if plan.planned_duration_s else None,
                           "structured": bool(plan.structure)}
@@ -288,8 +290,9 @@ def load_report(db: Session, user: User, today: dt.date | None = None) -> dict:
     nxt = db.scalar(select(SeasonEvent).where(SeasonEvent.user_id == user.id, SeasonEvent.date >= today).order_by(SeasonEvent.date))
     recent = _acts_since(db, user, today - dt.timedelta(days=56))
     mm = _metrics_map(db, user, recent)
+    heat_ids = {w.activity_id for w in calendar_data(db, user, today - dt.timedelta(days=55), today)[0] if w.heat and w.activity_id}
     ef_rides = [{"date": a.start_time.date(), "ef": mm[a.id].get("ef")} for a in recent
-                if a.id in mm and mm[a.id].get("ef") and (mm[a.id].get("intensity") or 1) < 0.8 and a.duration_s >= 2700]
+                if a.id not in heat_ids and a.id in mm and mm[a.id].get("ef") and (mm[a.id].get("intensity") or 1) < 0.8 and a.duration_s >= 2700]
     res = AN.load_assessment(
         rows, today=today, planned_14d=planned, actual_14d=actual,
         atp_last_week={"target": atp_last.tss_target, "actual": last_week_actual, "recovery": atp_last.recovery} if atp_last else None,
@@ -416,6 +419,7 @@ schreib es in ftp_hint mit dem Vorschlag aus der FTP-Pruefung; der Athlet kann i
 stehen nur in personal_bests_90d; die kurz wuerdigen.
 - Erfinde keine Empfindungen (Gefuehl, Beine, Motivation), Wetter oder Umstaende, die nicht in den Daten stehen.
 - Datenqualitaet: Ohne Powermeter nur vorsichtig urteilen und das sagen.
+- Hitzeeinheit (plan.heat): Hoeherer Puls und mehr Entkopplung sind hier erwartbar und kein Zeichen von Ermuedung. Bewerte Intensitaet nach Gefuehl und Puls, nicht nach Soll-Watt, und frage nach Trinken und Wohlbefinden, statt Abweichungen als zu hart oder zu locker zu werten.
 - Gesundheit: Bei Hinweisen auf Ueberlastung oder Krankheit (Puls auffaellig, Abbruch) zur Pause raten; keine Diagnosen.
 Schwellen wie TSB-Bereiche und Entkopplung sind Praxisregeln, keine Studienergebnisse."""
 

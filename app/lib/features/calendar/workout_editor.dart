@@ -97,6 +97,11 @@ class _WorkoutEditorScreenState extends ConsumerState<WorkoutEditorScreen> {
     return out.any((s) => s == null) ? null : out.cast<Map<String, dynamic>>();
   }
 
+  void _moveStep(int from, int to) {
+    _steps.insert(to, _steps.removeAt(from));
+    _changed();
+  }
+
   void _changed() {
     setState(() {});
     _schedulePreview();
@@ -324,7 +329,10 @@ class _WorkoutEditorScreenState extends ConsumerState<WorkoutEditorScreen> {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         const SectionHeader(title: 'Profil', subtitle: 'Leistung in % der FTP, Farbe = Zone'),
-                        SizedBox(height: 170, child: WorkoutProfile(structure: _structure())),
+                        SizedBox(
+                          height: 170,
+                          child: WorkoutProfile(structure: _structure(), onMove: _moveStep),
+                        ),
                         const SizedBox(height: Gap.lg),
                         WorkoutSummary(summary: _summary),
                       ],
@@ -485,18 +493,38 @@ class _StepList extends StatelessWidget {
   final void Function(StepNode) onRemoved;
 
   @override
-  Widget build(BuildContext context) => Column(
+  Widget build(BuildContext context) => ReorderableListView(
+    shrinkWrap: true,
+    physics: const NeverScrollableScrollPhysics(),
+    buildDefaultDragHandles: false,
+    onReorderItem: (from, to) {
+      steps.insert(to, steps.removeAt(from));
+      onChanged();
+    },
     children: [
-      for (final s in steps)
-        s.isGroup
-            ? _GroupCard(node: s, onChanged: onChanged, onRemove: () => onRemoved(s))
-            : _LeafRow(node: s, onChanged: onChanged, onRemove: () => onRemoved(s)),
+      for (var i = 0; i < steps.length; i++)
+        KeyedSubtree(
+          key: ObjectKey(steps[i]),
+          child: steps[i].isGroup
+              ? _GroupCard(index: i, node: steps[i], onChanged: onChanged, onRemove: () => onRemoved(steps[i]))
+              : _LeafRow(index: i, node: steps[i], onChanged: onChanged, onRemove: () => onRemoved(steps[i])),
+        ),
     ],
   );
 }
 
+/// Anfasser zum Verschieben eines Blocks in der Liste.
+Widget _dragHandle(int index) => ReorderableDragStartListener(
+  index: index,
+  child: const MouseRegion(
+    cursor: SystemMouseCursors.grab,
+    child: Padding(padding: EdgeInsets.all(Gap.xs), child: Icon(Icons.drag_indicator_rounded)),
+  ),
+);
+
 class _LeafRow extends StatelessWidget {
-  const _LeafRow({required this.node, required this.onChanged, required this.onRemove});
+  const _LeafRow({required this.index, required this.node, required this.onChanged, required this.onRemove});
+  final int index;
   final StepNode node;
   final VoidCallback onChanged;
   final VoidCallback onRemove;
@@ -545,6 +573,7 @@ class _LeafRow extends StatelessWidget {
                 children: [
                   Row(
                     children: [
+                      _dragHandle(index),
                       Expanded(child: type),
                       remove,
                     ],
@@ -559,6 +588,7 @@ class _LeafRow extends StatelessWidget {
             }
             return Row(
               children: [
+                _dragHandle(index),
                 SizedBox(width: 150, child: type),
                 const SizedBox(width: Gap.sm),
                 ...values,
@@ -604,7 +634,8 @@ class _LeafRow extends StatelessWidget {
 }
 
 class _GroupCard extends StatelessWidget {
-  const _GroupCard({required this.node, required this.onChanged, required this.onRemove});
+  const _GroupCard({required this.index, required this.node, required this.onChanged, required this.onRemove});
+  final int index;
   final StepNode node;
   final VoidCallback onChanged;
   final VoidCallback onRemove;
@@ -625,6 +656,7 @@ class _GroupCard extends StatelessWidget {
         children: [
           Row(
             children: [
+              _dragHandle(index),
               Icon(Icons.repeat_rounded, color: t.colorScheme.primary),
               const SizedBox(width: Gap.sm),
               Text('Wiederholen', style: t.textTheme.titleSmall),
@@ -670,18 +702,20 @@ class _GroupCard extends StatelessWidget {
 }
 
 /// Ein Abschnitt des Profils: Start, Dauer (s) und Leistung am Anfang/Ende (% FTP).
-typedef _Seg = (double start, double secs, double from, double to);
+/// `top` ist der Index des Blocks auf oberster Ebene (fuer Drag and Drop im Graph).
+typedef _Seg = (double start, double secs, double from, double to, int top);
 
 List<_Seg> _segments(List<Map<String, dynamic>> structure) {
   final out = <_Seg>[];
   var t = 0.0;
+  var top = 0;
   void leaf(Map<String, dynamic> l) {
     final secs = (l['duration_s'] as num).toDouble();
     final p = (l['power_pct'] as List).cast<num>();
     final ramp = l['type'] == 'warmup' || l['type'] == 'cooldown';
     final a = ramp ? p[0].toDouble() : (p[0] + p[1]) / 2;
     final b = ramp ? p[1].toDouble() : a;
-    out.add((t, secs, a.toDouble(), b.toDouble()));
+    out.add((t, secs, a.toDouble(), b.toDouble(), top));
     t += secs;
   }
 
@@ -695,20 +729,39 @@ List<_Seg> _segments(List<Map<String, dynamic>> structure) {
     } else {
       leaf(s);
     }
+    top++;
   }
   return out;
 }
 
 /// Blockprofil des Workouts; jede Stufe in der Farbe ihrer Leistungszone.
-class WorkoutProfile extends StatelessWidget {
-  const WorkoutProfile({super.key, required this.structure, this.mini = false});
+/// Mit [onMove] lassen sich Bloecke (auf oberster Ebene) per Ziehen verschieben.
+class WorkoutProfile extends StatefulWidget {
+  const WorkoutProfile({super.key, required this.structure, this.mini = false, this.onMove});
   final List<Map<String, dynamic>>? structure;
   final bool mini;
+  final void Function(int from, int to)? onMove;
+
+  @override
+  State<WorkoutProfile> createState() => _WorkoutProfileState();
+}
+
+class _WorkoutProfileState extends State<WorkoutProfile> {
+  int? _from; // gezogener Block
+  int? _to; // Ziel-Block unter dem Finger
+
+  /// Block auf oberster Ebene an Position [dx] (Pixel) ermitteln.
+  int _topAt(List<_Seg> segs, double dx, double width) {
+    final total = segs.last.$1 + segs.last.$2;
+    final secs = (dx / width * total).clamp(0.0, total - 0.001);
+    return segs.firstWhere((s) => secs >= s.$1 && secs < s.$1 + s.$2, orElse: () => segs.last).$5;
+  }
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context);
-    if (structure == null || structure!.isEmpty) {
+    final structure = widget.structure;
+    if (structure == null || structure.isEmpty) {
       return Center(
         child: Text(
           'Ungültige Eingabe, bitte Schritte prüfen.',
@@ -716,21 +769,45 @@ class WorkoutProfile extends StatelessWidget {
         ),
       );
     }
-    final segs = _segments(structure!);
-    final total = segs.isEmpty ? 0.0 : segs.last.$1 + segs.last.$2;
+    final segs = _segments(structure);
+    final total = segs.last.$1 + segs.last.$2;
     final painter = _ProfilePainter(
       segs: segs,
       grid: t.colorScheme.outlineVariant,
       ftpLine: t.colorScheme.onSurfaceVariant,
-      mini: mini,
+      mini: widget.mini,
+      accent: t.colorScheme.primary,
+      dragFrom: _from,
+      dragTo: _to,
     );
-    if (mini) return CustomPaint(painter: painter, size: Size.infinite);
+    if (widget.mini) return CustomPaint(painter: painter, size: Size.infinite);
+
+    Widget chart(double width) {
+      final paint = CustomPaint(painter: painter, size: Size.infinite);
+      if (widget.onMove == null) return paint;
+      void end() {
+        final from = _from, to = _to;
+        setState(() => _from = _to = null);
+        if (from != null && to != null && from != to) widget.onMove!(from, to);
+      }
+
+      return MouseRegion(
+        cursor: _from != null ? SystemMouseCursors.grabbing : SystemMouseCursors.grab,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onHorizontalDragStart: (d) => setState(() => _from = _to = _topAt(segs, d.localPosition.dx, width)),
+          onHorizontalDragUpdate: (d) => setState(() => _to = _topAt(segs, d.localPosition.dx, width)),
+          onHorizontalDragEnd: (_) => end(),
+          onHorizontalDragCancel: () => setState(() => _from = _to = null),
+          child: paint,
+        ),
+      );
+    }
+
     final axis = t.textTheme.labelSmall?.copyWith(color: t.colorScheme.onSurfaceVariant);
     return Column(
       children: [
-        Expanded(
-          child: CustomPaint(painter: painter, size: Size.infinite),
-        ),
+        Expanded(child: LayoutBuilder(builder: (_, box) => chart(box.maxWidth))),
         const SizedBox(height: 6),
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -746,11 +823,21 @@ class WorkoutProfile extends StatelessWidget {
 }
 
 class _ProfilePainter extends CustomPainter {
-  _ProfilePainter({required this.segs, required this.grid, required this.ftpLine, required this.mini});
+  _ProfilePainter({
+    required this.segs,
+    required this.grid,
+    required this.ftpLine,
+    required this.mini,
+    required this.accent,
+    this.dragFrom,
+    this.dragTo,
+  });
   final List<_Seg> segs;
   final Color grid;
   final Color ftpLine;
   final bool mini;
+  final Color accent;
+  final int? dragFrom, dragTo;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -782,7 +869,22 @@ class _ProfilePainter extends CustomPainter {
         ..lineTo(r, size.height)
         ..close();
       final c = AppColors.zoneColor((s.$3 + s.$4) / 2);
-      canvas.drawPath(path, Paint()..color = c.withValues(alpha: mini ? 0.9 : 0.85));
+      final alpha = mini ? 0.9 : (s.$5 == dragFrom ? 0.4 : 0.85);
+      canvas.drawPath(path, Paint()..color = c.withValues(alpha: alpha));
+    }
+
+    // Einfuegemarke: vor dem Ziel-Block beim Ziehen nach links, dahinter beim Ziehen nach rechts
+    if (dragFrom != null && dragTo != null && dragFrom != dragTo) {
+      final target = segs.where((s) => s.$5 == dragTo);
+      final secs = dragTo! > dragFrom! ? target.last.$1 + target.last.$2 : target.first.$1;
+      final mx = x(secs).clamp(1.5, size.width - 1.5);
+      canvas.drawLine(
+        Offset(mx, 0),
+        Offset(mx, size.height),
+        Paint()
+          ..color = accent
+          ..strokeWidth = 3,
+      );
     }
 
     if (!mini) {
@@ -807,5 +909,10 @@ class _ProfilePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_ProfilePainter old) =>
-      old.segs != segs || old.grid != grid || old.ftpLine != ftpLine || old.mini != mini;
+      old.segs != segs ||
+      old.grid != grid ||
+      old.ftpLine != ftpLine ||
+      old.mini != mini ||
+      old.dragFrom != dragFrom ||
+      old.dragTo != dragTo;
 }

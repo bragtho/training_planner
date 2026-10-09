@@ -216,3 +216,34 @@ def test_planned_workouts_only_match_their_own_sport():
     st = {w["title"]: w["status"] for w in cal["workouts"]}
     assert st == {"Rad": "missed", "Kraft": "completed"}  # Lauf erfuellt das Radtraining nicht, Krafttraining das Kraftprogramm
     assert len(cal["activities"]) == 2
+
+
+def test_heat_flag_survives_edit_and_copy():
+    c, h = _client()
+    d = dt.date.today().isoformat()
+    w = c.post("/workouts", json={"date": d, "title": "Hitze 1/5", "planned_tss": 30, "heat": True}, headers=h).json()
+    assert w["heat"] is True
+    # Der Editor der App kennt heat nicht und schickt es nicht mit: Markierung bleibt
+    r = c.put(f"/workouts/{w['id']}", json={"date": d, "title": "Hitze 1/5 neu", "planned_tss": 30}, headers=h).json()
+    assert r["heat"] is True and r["title"] == "Hitze 1/5 neu"
+    assert c.post(f"/workouts/{w['id']}/copy", params={"date": d}, headers=h).json()["heat"] is True
+    assert c.put(f"/workouts/{w['id']}", json={"date": d, "title": "x", "heat": False}, headers=h).json()["heat"] is False
+
+
+def test_heat_ride_is_marked_in_report():
+    from app import insights
+    from app.models import AthleteProfile, PlannedWorkout
+
+    day = dt.date.today() - dt.timedelta(days=1)
+    with SessionLocal() as db:
+        u = User(email="h@example.com", password_hash="x")
+        u.profile = AthleteProfile(ftp=250.0)
+        db.add(u)
+        db.commit()
+        act = Activity(user_id=u.id, source="strava", external_id="9", name="Rolle", sport="Ride",
+                       start_time=dt.datetime.combine(day, dt.time(9)), duration_s=3600, tss=50.0)
+        db.add_all([act, PlannedWorkout(user_id=u.id, date=day, title="Hitze 1/5", planned_tss=50, heat=True)])
+        db.commit()
+        rep = insights.activity_report(db, u, act, fetch=False)
+        assert rep["plan"]["heat"] is True and any("Hitze" in q for q in rep["data_quality"])
+        assert insights.load_report(db, u)["verdict"]  # laeuft mit Hitzefahrt ohne Fehler durch

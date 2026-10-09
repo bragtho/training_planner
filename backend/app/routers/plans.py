@@ -29,6 +29,7 @@ class WorkoutIn(BaseModel):
     planned_tss: float | None = Field(None, ge=0, le=1000)
     # "completed" setzt der Athlet von Hand (Krafttraining wird nicht von Strava importiert)
     status: Literal["planned", "skipped", "completed"] = "planned"
+    heat: bool | None = None  # Hitzetraining; None laesst den gespeicherten Wert unveraendert
 
 
 class WorkoutOut(BaseModel):
@@ -43,6 +44,7 @@ class WorkoutOut(BaseModel):
     status: str
     created_by: str
     kind: str = "bike"  # bike | strength
+    heat: bool = False
     activity_id: int | None = None
     actual_tss: float | None = None
 
@@ -56,6 +58,8 @@ def _apply(w: PlannedWorkout, body: WorkoutIn, ftp: float) -> None:
     w.title = body.title.strip()
     w.description = body.description
     w.status = body.status
+    if body.heat is not None:
+        w.heat = body.heat
     if body.structure:
         s = summarize(body.structure, ftp)
         w.structure = [step.model_dump() for step in body.structure]
@@ -85,7 +89,7 @@ def _serialize(w: PlannedWorkout, act: Activity | None, today: dt.date) -> Worko
     return WorkoutOut(
         id=w.id, date=w.date, title=w.title, description=w.description, structure=structure,
         planned_duration_s=w.planned_duration_s, planned_tss=w.planned_tss, status=status,
-        created_by=w.created_by, kind="strength" if is_strength(w.structure) else "bike",
+        created_by=w.created_by, kind="strength" if is_strength(w.structure) else "bike", heat=bool(w.heat),
         activity_id=act.id if act else None, actual_tss=act.tss if act else None,
     )
 
@@ -201,7 +205,7 @@ def copy_workout(
     src = _get(db, user, workout_id)
     w = PlannedWorkout(
         user_id=user.id, date=date, title=src.title, description=src.description, structure=src.structure,
-        planned_duration_s=src.planned_duration_s, planned_tss=src.planned_tss, created_by="user",
+        planned_duration_s=src.planned_duration_s, planned_tss=src.planned_tss, heat=src.heat, created_by="user",
     )
     db.add(w)
     db.commit()

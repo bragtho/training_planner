@@ -133,6 +133,7 @@ TOOLS: list[dict] = [
                             "structure": _STEPS,
                             "planned_duration_s": {"type": "integer", "description": "Nur ohne structure (z. B. freie Ausfahrt)"},
                             "planned_tss": {"type": "number", "description": "Nur ohne structure"},
+                            "heat": {"type": "boolean", "description": "true bei einer Einheit eines Hitze-Blocks (Heat Acclimation), siehe Abschnitt Hitzetraining"},
                         },
                         "required": ["date", "title"],
                     },
@@ -148,7 +149,7 @@ TOOLS: list[dict] = [
             "type": "object",
             "properties": {
                 "id": {"type": "integer"}, "date": _DATE, "title": {"type": "string"}, "description": {"type": "string"},
-                "structure": _STEPS, "status": {"type": "string", "enum": ["planned", "skipped"]},
+                "structure": _STEPS, "status": {"type": "string", "enum": ["planned", "skipped"]}, "heat": {"type": "boolean"},
             },
             "required": ["id"],
         },
@@ -324,6 +325,8 @@ def _workout_view(w, structure: bool = False) -> dict:
         "created_by": w.created_by,
         "kind": "strength" if is_strength(w.structure) else "bike",
     }
+    if w.heat:
+        d["heat"] = True
     if w.description:
         d["description"] = w.description
     if structure:
@@ -459,7 +462,7 @@ def update_workout(db: Session, user: User, args: dict) -> dict:
         "planned_duration_s": w.planned_duration_s if not w.structure else None,
         "planned_tss": w.planned_tss if not w.structure else None, "status": w.status,
     }
-    data.update({k: v for k, v in args.items() if k in ("date", "title", "description", "structure", "status")})
+    data.update({k: v for k, v in args.items() if k in ("date", "title", "description", "structure", "status", "heat")})
     try:
         body = WorkoutIn.model_validate(data)
     except ValidationError as e:

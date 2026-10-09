@@ -533,7 +533,11 @@ class _DayCell extends StatelessWidget {
           tss: (w['status'] == 'completed' ? w['actual_tss'] : w['planned_tss']) as num?,
           strike: w['status'] == 'skipped',
           check: w['status'] == 'completed',
-          icon: w['kind'] == 'strength' ? Icons.fitness_center_rounded : null,
+          icon: w['kind'] == 'strength'
+              ? Icons.fitness_center_rounded
+              : w['heat'] == true
+                  ? Icons.local_fire_department_rounded
+                  : null,
           narrow: narrow,
         ),
       for (final a in loose[key] ?? const <Json>[])
@@ -841,7 +845,9 @@ class _DaySheet extends StatelessWidget {
                     ? Icons.check_circle_rounded
                     : w['kind'] == 'strength'
                         ? Icons.fitness_center_rounded
-                        : Icons.event_note_rounded,
+                        : w['heat'] == true
+                            ? Icons.local_fire_department_rounded
+                            : Icons.event_note_rounded,
                 title: w['title'] as String,
                 status: _labels[w['status']] ?? '',
                 details: [

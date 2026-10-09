@@ -1,5 +1,6 @@
 import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import 'theme.dart';
@@ -452,6 +453,48 @@ class LoadingBlock extends StatelessWidget {
       borderRadius: BorderRadius.circular(Radii.lg),
     ),
   );
+}
+
+/// Fertig geladen (oder Fehler)? Beim Aktualisieren bleibt der alte Wert stehen und gilt weiter als fertig.
+bool loaded(AsyncValue<Object?> v) => !v.isLoading || v.hasValue;
+
+/// Ein Abschnitt fuer [TopDown]: [ready] sagt, ob seine Daten da sind.
+class TopDownSection {
+  const TopDownSection({
+    required this.ready,
+    required this.child,
+    this.placeholder = 120,
+    this.loading,
+    this.gap = Gap.md,
+  });
+  final bool ready;
+  final Widget child;
+  final double placeholder;
+  final Widget? loading; // statt des grauen Blocks, z. B. mit Hinweistext
+  final double gap;
+}
+
+/// Baut Abschnitte strikt von oben nach unten auf: Ein Abschnitt erscheint erst, wenn alle darueber fertig sind.
+/// Darunter steht nur der Platzhalter des gerade ladenden Abschnitts. So waechst die Seite nur nach unten,
+/// und bereits sichtbarer Inhalt verschiebt sich nie.
+class TopDown extends StatelessWidget {
+  const TopDown({super.key, required this.sections});
+  final List<TopDownSection> sections;
+
+  @override
+  Widget build(BuildContext context) {
+    final out = <Widget>[];
+    for (var i = 0; i < sections.length; i++) {
+      final s = sections[i];
+      if (i > 0) out.add(SizedBox(height: s.gap));
+      if (!s.ready) {
+        out.add(s.loading ?? LoadingBlock(height: s.placeholder));
+        break;
+      }
+      out.add(s.child);
+    }
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: out);
+  }
 }
 
 /// Farbige Linie fuer Diagramm-Legenden.

@@ -41,6 +41,15 @@ class ActivityScreen extends ConsumerWidget {
       }
     });
 
+    final cycling = act.hasValue && isCyclingSport(act.value!['sport'] as String?);
+    final waiting = SurfaceCard(
+      child: Row(children: [
+        const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+        const SizedBox(width: Gap.md),
+        Expanded(child: Text('Lade Sensordaten von Strava …', style: Theme.of(context).textTheme.bodyMedium)),
+      ]),
+    );
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Aktivität'),
@@ -50,27 +59,30 @@ class ActivityScreen extends ConsumerWidget {
       body: PageBody(
         maxWidth: 1000,
         children: [
-          act.when(
-            loading: () => const LoadingBlock(height: 220),
-            error: (e, _) => StatusMessage.error(errorMessage(e), onRetry: () => ref.invalidate(activityProvider(id))),
-            data: (a) => _Header(a: a),
-          ),
-          const SizedBox(height: Gap.xl),
-          // Auswertung und Feedback gibt es nur fuer Radtraining
-          if (act.hasValue && isCyclingSport(act.value!['sport'] as String?)) ActivityAnalysisSection(id: id),
-          streams.when(
-            loading: () => SurfaceCard(
-              child: Row(children: [
-                const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
-                const SizedBox(width: Gap.md),
-                Expanded(
-                  child: Text('Lade Sensordaten von Strava …',
-                      style: Theme.of(context).textTheme.bodyMedium),
+          // Von oben nach unten: Kopf, Analyse (nur Radtraining), Sensordaten
+          TopDown(
+            sections: [
+              TopDownSection(
+                ready: loaded(act),
+                placeholder: 220,
+                child: act.when(
+                  loading: () => const SizedBox.shrink(),
+                  error: (e, _) => StatusMessage.error(errorMessage(e), onRetry: () => ref.invalidate(activityProvider(id))),
+                  data: (a) => _Header(a: a),
                 ),
-              ]),
-            ),
-            error: (e, _) => StatusMessage.error(errorMessage(e), onRetry: () => ref.invalidate(streamsProvider(id))),
-            data: (s) => _Details(id: id, streams: s, ftp: ftp),
+              ),
+              if (cycling) ...analysisSections(ref, id, gap: Gap.xl, waiting: waiting),
+              TopDownSection(
+                ready: loaded(streams),
+                gap: cycling ? Gap.md : Gap.xl,
+                loading: waiting,
+                child: streams.when(
+                  loading: () => const SizedBox.shrink(),
+                  error: (e, _) => StatusMessage.error(errorMessage(e), onRetry: () => ref.invalidate(streamsProvider(id))),
+                  data: (s) => _Details(id: id, streams: s, ftp: ftp),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -265,15 +277,22 @@ class _DetailsState extends ConsumerState<_Details> {
     }
     final hasPower = charts.any((c) => c.$1 == 'watts');
     final ftp = widget.ftp;
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      LapsCard(
-        id: widget.id,
-        ftp: ftp,
-        selected: _selected,
-        zoomed: _sectionZoomed,
-        onSelect: _select,
-        onZoom: (z) => setState(() => _view = z && _selected != null ? _sectionFor(_selected!) : null),
+    // Runden stehen oben und erscheinen erst nach dem Laden; der Rest wartet darauf, damit nichts nach unten rutscht
+    return TopDown(sections: [
+      TopDownSection(
+        ready: loaded(ref.watch(lapsProvider(widget.id))),
+        placeholder: 200,
+        gap: 0,
+        child: LapsCard(
+          id: widget.id,
+          ftp: ftp,
+          selected: _selected,
+          zoomed: _sectionZoomed,
+          onSelect: _select,
+          onZoom: (z) => setState(() => _view = z && _selected != null ? _sectionFor(_selected!) : null),
+        ),
       ),
+      TopDownSection(ready: true, gap: 0, child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       if (hasMap) ...[
         ActivityMapCard(streams: streams, highlight: _selected, zoomed: _sectionZoomed),
         const SizedBox(height: Gap.md),
@@ -336,6 +355,7 @@ class _DetailsState extends ConsumerState<_Details> {
           onSelect: _select,
           onZoom: (z) => setState(() => _view = z && _selected != null ? _sectionFor(_selected!) : null),
         ),
+      ])),
     ]);
   }
 }

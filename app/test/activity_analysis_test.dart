@@ -57,6 +57,9 @@ void main() {
   testWidgets('Gespeichertes Feedback zeigt Kernaussage, Punkte und FTP-Hinweis', (tester) async {
     await tester.pumpWidget(_app(const CoachFeedbackCard(id: 1, analysis: _analysis)));
     expect(find.text('Intervalle sauber getroffen'), findsOneWidget);
+    expect(find.text('Mehr trinken'), findsNothing); // standardmaessig eingeklappt
+    await tester.tap(find.text('Intervalle sauber getroffen'));
+    await tester.pump();
     expect(find.text('Wie geplant'), findsOneWidget);
     expect(find.text('Belastung passt'), findsOneWidget);
     expect(find.text('Gleichmäßig gefahren'), findsOneWidget);
@@ -71,6 +74,7 @@ void main() {
     ]));
     await tester.pump();
     await tester.pump();
+    expect(find.text('Dein Coach analysiert die Fahrt im Hintergrund …'), findsNothing); // schon fertig
     expect(find.text('Frisch erstellt 7'), findsOneWidget);
   });
 

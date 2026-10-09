@@ -109,28 +109,41 @@ class _Columns extends StatelessWidget {
   );
 }
 
-class _Overview extends StatelessWidget {
+class _Overview extends ConsumerWidget {
   const _Overview({required this.data});
   final Json data;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final n = DateTime.now();
+    final today = DateTime(n.year, n.month, n.day);
+    final monday = mondayOf(today);
+    final heroReady = loaded(ref.watch(formHintProvider)) && loaded(ref.watch(loadCheckProvider));
+    final todayReady =
+        loaded(ref.watch(calendarProvider((today, today.add(const Duration(days: 14)))))) &&
+        loaded(ref.watch(calendarProvider((monday, monday.add(const Duration(days: 6)))))) &&
+        loaded(ref.watch(atpProvider(seasonRange(n)))) &&
+        loaded(ref.watch(activitiesProvider));
     final cur = data['current'] as Map;
     final rows = [for (final r in data['rows'] as List) Json.from(r as Map)];
     num weekAgo(String k) => rows.length > 7 ? rows[rows.length - 8][k] as num : rows.first[k] as num;
     final ctl = cur['ctl'] as num, atl = cur['atl'] as num, tsb = cur['tsb'] as num;
 
     // Reihenfolge nach Bedeutung: Zustand, heutiges Training, Woche, danach Verlauf und letzte Aktivitäten
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _FormHero(tsb: tsb, ctl: ctl, atl: atl, ctlDelta: ctl - weekAgo('ctl'), atlDelta: atl - weekAgo('atl')),
-        const SizedBox(height: Gap.md),
-        const _Columns(leftFlex: 1, rightFlex: 1, equalHeight: true, left: TodayCard(), right: WeekCard()),
-        const SizedBox(height: Gap.md),
-        _PmcCard(rows: rows),
-        const SizedBox(height: Gap.xl),
-        const _RecentActivities(),
+    return TopDown(
+      sections: [
+        TopDownSection(
+          ready: heroReady,
+          placeholder: 200,
+          child: _FormHero(tsb: tsb, ctl: ctl, atl: atl, ctlDelta: ctl - weekAgo('ctl'), atlDelta: atl - weekAgo('atl')),
+        ),
+        TopDownSection(
+          ready: todayReady,
+          placeholder: 170,
+          child: const _Columns(leftFlex: 1, rightFlex: 1, equalHeight: true, left: TodayCard(), right: WeekCard()),
+        ),
+        TopDownSection(ready: true, child: _PmcCard(rows: rows)),
+        TopDownSection(ready: loaded(ref.watch(activitiesProvider)), placeholder: 80, gap: Gap.xl, child: const _RecentActivities()),
       ],
     );
   }

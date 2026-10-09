@@ -26,37 +26,37 @@ const _executionLabels = {
       _ => ('Belastung unklar', const Color(0xFF94A3B8)),
     };
 
-/// Analyse unter dem Kopf der Aktivitaet: Feedback des Coaches, Soll/Ist und weitere Kennzahlen.
-/// Wartet auf die Sensordaten, damit sie nicht doppelt bei Strava geholt werden.
-class ActivityAnalysisSection extends ConsumerWidget {
-  const ActivityAnalysisSection({super.key, required this.id});
-  final int id;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final streams = ref.watch(streamsProvider(id));
-    if (streams.isLoading) return const SizedBox.shrink();
-    final analysis = ref.watch(activityAnalysisProvider(id));
-    return analysis.when(
-      loading: () => const Padding(padding: EdgeInsets.only(bottom: Gap.md), child: LoadingBlock(height: 160)),
-      error: (e, _) => Padding(
-        padding: const EdgeInsets.only(bottom: Gap.md),
-        child: StatusMessage.error(errorMessage(e), onRetry: () => ref.invalidate(activityAnalysisProvider(id))),
-      ),
-      data: (a) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        CoachFeedbackCard(id: id, analysis: a),
-        const SizedBox(height: Gap.md),
-        if (a['compliance'] != null) ...[
-          ComplianceCard(compliance: Json.from(a['compliance'] as Map), plan: Json.from((a['plan'] ?? const {}) as Map)),
-          const SizedBox(height: Gap.md),
-        ],
-        if (a['metrics'] != null) ...[
-          RideDetails(metrics: Json.from(a['metrics'] as Map), bests: (a['personal_bests_90d'] as List?) ?? const []),
-          const SizedBox(height: Gap.md),
-        ],
-      ]),
-    );
+/// Abschnitte der Analyse (Feedback des Coaches, Soll/Ist, weitere Kennzahlen) fuer [TopDown].
+/// Erst nach den Sensordaten, damit sie nicht doppelt bei Strava geholt werden; [waiting] steht bis dahin.
+List<TopDownSection> analysisSections(WidgetRef ref, int id, {required double gap, required Widget waiting}) {
+  if (!loaded(ref.watch(streamsProvider(id)))) {
+    return [TopDownSection(ready: false, gap: gap, loading: waiting, child: const SizedBox.shrink())];
   }
+  final analysis = ref.watch(activityAnalysisProvider(id));
+  final a = analysis.value;
+  return [
+    // Das KI-Feedback ist eingeklappt und laedt im Hintergrund (gleiche Hoehe), es haelt nichts darunter auf
+    TopDownSection(
+      ready: loaded(analysis),
+      gap: gap,
+      placeholder: 160,
+      child: analysis.when(
+        loading: () => const SizedBox.shrink(),
+        error: (e, _) => StatusMessage.error(errorMessage(e), onRetry: () => ref.invalidate(activityAnalysisProvider(id))),
+        data: (a) => CoachFeedbackCard(id: id, analysis: a),
+      ),
+    ),
+    if (a?['compliance'] != null)
+      TopDownSection(
+        ready: true,
+        child: ComplianceCard(compliance: Json.from(a!['compliance'] as Map), plan: Json.from((a['plan'] ?? const {}) as Map)),
+      ),
+    if (a?['metrics'] != null)
+      TopDownSection(
+        ready: true,
+        child: RideDetails(metrics: Json.from(a!['metrics'] as Map), bests: (a['personal_bests_90d'] as List?) ?? const []),
+      ),
+  ];
 }
 
 /// Feedback des Coaches zur Fahrt. Fehlt es, wird es automatisch erstellt (wenn der Coach eingerichtet ist).
@@ -103,26 +103,17 @@ class _CoachFeedbackCardState extends ConsumerState<CoachFeedbackCard> {
     }
     final fb = ref.watch(activityFeedbackProvider(widget.id));
     return fb.when(
-      loading: () => const _FeedbackLoading(),
-      error: (e, _) => StatusMessage.error(errorMessage(e), onRetry: () => ref.invalidate(activityFeedbackProvider(widget.id))),
+      loading: () => _FeedbackView(analysis: a, busy: _regenerating, onRegenerate: _regenerate),
+      error: (e, _) => _FeedbackView(
+        analysis: a,
+        busy: _regenerating,
+        onRegenerate: _regenerate,
+        error: errorMessage(e),
+        onRetry: () => ref.invalidate(activityFeedbackProvider(widget.id)),
+      ),
       data: (f) => _FeedbackView(fb: f, analysis: a, busy: _regenerating, onRegenerate: _regenerate),
     );
   }
-}
-
-class _FeedbackLoading extends StatelessWidget {
-  const _FeedbackLoading();
-
-  @override
-  Widget build(BuildContext context) => SurfaceCard(
-        child: Row(children: [
-          const _CoachMark(),
-          const SizedBox(width: Gap.md),
-          const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
-          const SizedBox(width: Gap.md),
-          Expanded(child: Text('Dein Coach analysiert die Fahrt …', style: Theme.of(context).textTheme.bodyMedium)),
-        ]),
-      );
 }
 
 class _CoachMark extends StatelessWidget {
@@ -140,16 +131,37 @@ class _CoachMark extends StatelessWidget {
       );
 }
 
-class _FeedbackView extends StatelessWidget {
-  const _FeedbackView({required this.fb, required this.analysis, required this.busy, required this.onRegenerate});
-  final Json fb;
+/// Eingeklappt (Standard) braucht die Karte immer gleich viel Platz, auch solange das Feedback noch laedt.
+class _FeedbackView extends StatefulWidget {
+  const _FeedbackView({
+    this.fb,
+    required this.analysis,
+    required this.busy,
+    required this.onRegenerate,
+    this.error,
+    this.onRetry,
+  });
+  final Json? fb; // null: wird noch erstellt (oder Fehler)
   final Json analysis;
   final bool busy;
   final VoidCallback onRegenerate;
+  final String? error;
+  final VoidCallback? onRetry;
+
+  @override
+  State<_FeedbackView> createState() => _FeedbackViewState();
+}
+
+class _FeedbackViewState extends State<_FeedbackView> {
+  bool _open = false;
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context);
+    final analysis = widget.analysis, busy = widget.busy, onRegenerate = widget.onRegenerate;
+    final ready = widget.fb != null;
+    final open = _open && ready;
+    final fb = widget.fb ?? const <String, dynamic>{};
     final (loadLabel, loadColor) = loadFitStyle(fb['load_fit'] as String?);
     final positives = [for (final p in (fb['positives'] as List? ?? const [])) p.toString()];
     final improvements = [for (final p in (fb['improvements'] as List? ?? const [])) p.toString()];
@@ -178,24 +190,47 @@ class _FeedbackView extends StatelessWidget {
         ),
         padding: const EdgeInsets.all(Gap.xl),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const _CoachMark(),
-            const SizedBox(width: Gap.md),
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('Feedback Deines Coaches',
-                    style: t.textTheme.labelMedium?.copyWith(color: t.colorScheme.onSurfaceVariant)),
-                Text(fb['headline'] as String? ?? '', style: t.textTheme.titleLarge),
-              ]),
-            ),
-            IconButton(
-              tooltip: 'Neu erstellen',
-              onPressed: busy ? null : onRegenerate,
-              icon: busy
-                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Icon(Icons.refresh_rounded),
-            ),
-          ]),
+          InkWell(
+            onTap: ready ? () => setState(() => _open = !_open) : null,
+            child: Row(children: [
+              const _CoachMark(),
+              const SizedBox(width: Gap.md),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('Feedback Deines Coaches',
+                      style: t.textTheme.labelMedium?.copyWith(color: t.colorScheme.onSurfaceVariant)),
+                  Text(
+                    ready
+                        ? fb['headline'] as String? ?? ''
+                        : widget.error ?? 'Dein Coach analysiert die Fahrt im Hintergrund …',
+                    maxLines: open ? null : 1,
+                    overflow: open ? null : TextOverflow.ellipsis,
+                    style: ready ? t.textTheme.titleLarge : t.textTheme.titleLarge?.copyWith(color: t.colorScheme.onSurfaceVariant),
+                  ),
+                ]),
+              ),
+              if (open || busy)
+                IconButton(
+                  tooltip: 'Neu erstellen',
+                  onPressed: busy ? null : onRegenerate,
+                  icon: busy
+                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.refresh_rounded),
+                ),
+              SizedBox(
+                width: 48,
+                height: 48,
+                child: Center(
+                  child: widget.error != null
+                      ? IconButton(tooltip: 'Erneut versuchen', onPressed: widget.onRetry, icon: const Icon(Icons.refresh_rounded))
+                      : ready
+                      ? Icon(open ? Icons.expand_less_rounded : Icons.expand_more_rounded)
+                      : const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
+                ),
+              ),
+            ]),
+          ),
+          if (open) ...[
           const SizedBox(height: Gap.md),
           Wrap(spacing: Gap.sm, runSpacing: Gap.sm, children: [
             if (analysis['type_label'] != null)
@@ -242,6 +277,7 @@ class _FeedbackView extends StatelessWidget {
                 ),
               ]),
             ),
+          ],
           ],
         ]),
       ),

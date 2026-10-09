@@ -66,7 +66,10 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
     final value = data.value;
 
     // Saisonplan (ATP): Phase je Woche (Montag -> Woche) und Events je Tag
-    final atp = ref.watch(atpProvider((start, end))).value;
+    final atpData = ref.watch(atpProvider((start, end)));
+    final atp = atpData.value;
+    // Wochenliste erst zeigen, wenn Trainings und Saisonplan da sind, sonst rutscht sie beim Nachladen
+    final ready = loaded(data) && loaded(atpData);
     final atpWeeks = <String, Json>{};
     final atpEvents = <String, List<Json>>{};
     if (atp != null) {
@@ -207,7 +210,9 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
                         ),
                       )
                     : _weekView
-                    ? _WeekList(start: start, workouts: workouts, loose: loose)
+                    ? (ready
+                          ? _WeekList(start: start, workouts: workouts, loose: loose)
+                          : const Align(alignment: Alignment.topCenter, child: LoadingBlock(height: 300)))
                     : LayoutBuilder(
                         builder: (context, c) {
                           final narrow = c.maxWidth < 600;

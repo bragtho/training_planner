@@ -1,3 +1,4 @@
+import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -5,6 +6,7 @@ import 'package:intl/intl.dart';
 
 import '../../core/api.dart';
 import '../../core/auth.dart';
+import '../../core/charts.dart';
 import '../../core/data.dart';
 import '../../core/theme.dart';
 import '../../core/ui.dart';
@@ -128,9 +130,7 @@ class _BestsScreenState extends ConsumerState<BestsScreen> {
       body: PageBody(
         maxWidth: 820,
         children: [
-          Wrap(
-            spacing: Gap.sm,
-            runSpacing: Gap.sm,
+          ChipRow(
             children: [
               for (final p in _Period.values)
                 ChoiceChip(
@@ -202,7 +202,9 @@ class _BestsScreenState extends ConsumerState<BestsScreen> {
                       title: 'Keine Leistungsdaten',
                       message: 'In diesem Zeitraum gibt es keine Fahrten mit Leistungsmessung.',
                     )
-                  else
+                  else ...[
+                    _BestsChart(efforts: efforts),
+                    const SizedBox(height: Gap.md),
                     SurfaceCard(
                       padding: EdgeInsets.zero,
                       child: Column(
@@ -214,6 +216,7 @@ class _BestsScreenState extends ConsumerState<BestsScreen> {
                         ],
                       ),
                     ),
+                  ],
                   const SizedBox(height: Gap.md),
                   Text(
                     'Einordnung: Coggan-Leistungsprofil (Training and Racing with a Power Meter, Werte für Männer), '
@@ -278,6 +281,156 @@ class _EffortRow extends StatelessWidget {
             if (level != null) Pill(label: e['level_label'] as String, color: color),
           ],
         ),
+      ),
+    );
+  }
+}
+
+const _bandLevels = ['amateur', 'elite', 'pro', 'worldtour'];
+const _bandLabels = {'amateur': 'Amateur', 'elite': 'Elite', 'pro': 'Profi', 'worldtour': 'Worldtour'};
+
+/// Leistungskurve (beste Leistung je Dauer) mit den Einordnungs-Grenzen als gestrichelte Linien.
+class _BestsChart extends StatelessWidget {
+  const _BestsChart({required this.efforts});
+  final List<Json> efforts;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = ChartStyle(context);
+    final useWkg = efforts.every((e) => e['wkg'] != null);
+    double mine(Json e) => ((useWkg ? e['wkg'] : e['watts']) as num).toDouble();
+    final bands = [
+      if (useWkg)
+        for (var l = 0; l < _bandLevels.length; l++)
+          LineChartBarData(
+            spots: [
+              for (var i = 0; i < efforts.length; i++)
+                if (efforts[i]['thresholds'] != null)
+                  FlSpot(i.toDouble(), ((efforts[i]['thresholds'] as List)[l] as num).toDouble()),
+            ],
+            color: _levelColors[_bandLevels[l]]!.withValues(alpha: 0.7),
+            barWidth: 1.5,
+            dashArray: const [5, 4],
+            isCurved: true,
+            curveSmoothness: 0.2,
+            preventCurveOverShooting: true,
+            dotData: const FlDotData(show: false),
+          ),
+    ];
+    final top = [
+      for (final e in efforts) mine(e),
+      if (useWkg)
+        for (final e in efforts)
+          if (e['thresholds'] != null) ((e['thresholds'] as List).last as num).toDouble(),
+    ].reduce((a, b) => a > b ? a : b);
+    const color = AppColors.power;
+    Json at(LineBarSpot s) => efforts[s.spotIndex];
+    return SurfaceCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SectionHeader(
+            title: 'Leistungskurve',
+            subtitle: useWkg ? 'Beste Leistung in W/kg, gestrichelt die Grenzen der Stufen' : 'Beste Leistung in W',
+          ),
+          SizedBox(
+            height: 240,
+            child: LineChart(
+              LineChartData(
+                minY: 0,
+                maxY: (top * 1.08).ceilToDouble(),
+                minX: 0,
+                maxX: (efforts.length - 1).toDouble().clamp(1, double.infinity),
+                lineBarsData: [
+                  LineChartBarData(
+                    spots: [for (var i = 0; i < efforts.length; i++) FlSpot(i.toDouble(), mine(efforts[i]))],
+                    color: color,
+                    barWidth: 3,
+                    isCurved: true,
+                    curveSmoothness: 0.15,
+                    preventCurveOverShooting: true,
+                    dotData: FlDotData(
+                      getDotPainter: (s, p, b, i) =>
+                          FlDotCirclePainter(radius: 4, color: color, strokeColor: cs.scheme.surface, strokeWidth: 2),
+                    ),
+                    belowBarData: cs.area(color, opacity: 0.18),
+                  ),
+                  ...bands,
+                ],
+                gridData: cs.grid(),
+                borderData: FlBorderData(show: false),
+                titlesData: FlTitlesData(
+                  topTitles: const AxisTitles(),
+                  rightTitles: const AxisTitles(),
+                  leftTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      reservedSize: 36,
+                      getTitlesWidget: (v, meta) => (v == meta.min || v == meta.max)
+                          ? const SizedBox.shrink()
+                          : Text(v.round().toString(), style: cs.axis),
+                    ),
+                  ),
+                  bottomTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      reservedSize: 26,
+                      interval: 1,
+                      getTitlesWidget: (v, meta) {
+                        final i = v.round();
+                        if (v != i || i < 0 || i >= efforts.length) return const SizedBox.shrink();
+                        if (efforts.length > 7 && i.isOdd) return const SizedBox.shrink(); // nicht zu eng
+                        return cs.axisLabel(shortDuration(efforts[i]['duration_s'] as int));
+                      },
+                    ),
+                  ),
+                ),
+                lineTouchData: LineTouchData(
+                  touchSpotThreshold: 40,
+                  touchTooltipData: LineTouchTooltipData(
+                    getTooltipColor: (_) => cs.tooltipColor(),
+                    tooltipBorderRadius: cs.tooltipRadius,
+                    fitInsideHorizontally: true,
+                    fitInsideVertically: true,
+                    getTooltipItems: (spots) => [
+                      for (final s in spots)
+                        if (s.barIndex != 0)
+                          null
+                        else
+                          LineTooltipItem(
+                            [
+                              '${at(s)['watts']} W',
+                              if (at(s)['wkg'] != null) '${at(s)['wkg']} W/kg',
+                            ].join(' \u00b7 '),
+                            cs.tooltipText(color),
+                            children: [
+                              TextSpan(
+                                text: [
+                                  '\nbeste ${shortDuration(at(s)['duration_s'] as int)}',
+                                  if (at(s)['level_label'] != null) at(s)['level_label'],
+                                ].join(' \u00b7 '),
+                                style: cs.tooltipTitle,
+                              ),
+                            ],
+                          ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          if (useWkg) ...[
+            const SizedBox(height: Gap.sm),
+            Wrap(
+              spacing: Gap.lg,
+              runSpacing: Gap.xs,
+              children: [
+                const LegendDot(label: 'Dein Bestwert', color: color),
+                for (final l in _bandLevels) LegendDot(label: _bandLabels[l]!, color: _levelColors[l]!),
+              ],
+            ),
+          ],
+        ],
       ),
     );
   }

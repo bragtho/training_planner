@@ -167,7 +167,7 @@ class _Details extends ConsumerStatefulWidget {
 class _DetailsState extends ConsumerState<_Details> {
   Highlight? _selected;
   ViewRange? _view; // null = ganze Fahrt
-  bool _combined = false; // alle Daten in einem Diagramm
+  bool _combined = true; // alle Daten in einem Diagramm
 
   double get _total => totalMinutes(streams);
 
@@ -266,16 +266,6 @@ class _DetailsState extends ConsumerState<_Details> {
     final hasPower = charts.any((c) => c.$1 == 'watts');
     final ftp = widget.ftp;
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      if (hasPower) ...[
-        PowerCurveCard(
-          id: widget.id,
-          selected: _selected,
-          zoomed: _sectionZoomed,
-          onSelect: _select,
-          onZoom: (z) => setState(() => _view = z && _selected != null ? _sectionFor(_selected!) : null),
-        ),
-        const SizedBox(height: Gap.md),
-      ],
       LapsCard(
         id: widget.id,
         ftp: ftp,
@@ -334,7 +324,18 @@ class _DetailsState extends ConsumerState<_Details> {
         ),
         const SizedBox(height: Gap.md),
       ],
-      if (hasPower && ftp != null && ftp > 0) _ZoneDistribution(streams: streams, ftp: ftp),
+      if (hasPower && ftp != null && ftp > 0) ...[
+        _ZoneDistribution(streams: streams, ftp: ftp),
+        const SizedBox(height: Gap.md),
+      ],
+      if (hasPower)
+        PowerCurveCard(
+          id: widget.id,
+          selected: _selected,
+          zoomed: _sectionZoomed,
+          onSelect: _select,
+          onZoom: (z) => setState(() => _view = z && _selected != null ? _sectionFor(_selected!) : null),
+        ),
     ]);
   }
 }

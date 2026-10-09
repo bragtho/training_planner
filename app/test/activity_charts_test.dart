@@ -73,9 +73,18 @@ Future<void> _load(WidgetTester tester, Widget w) async {
   }
 }
 
+/// Alle Diagramme der Fahrt ausser der Leistungskurve (die steht ganz unten).
+List<LineChart> _charts(WidgetTester tester) => tester.widgetList<LineChart>(find.byType(LineChart)).toList()..removeLast();
+
+/// Standardansicht ist "Kombiniert"; hier auf die einzelnen Diagramme wechseln.
+Future<void> _single(WidgetTester tester) async {
+  await tester.tap(find.text('Einzeln'));
+  await tester.pump(const Duration(milliseconds: 100));
+}
+
 /// Tippt in der Leistungskurve auf den Punkt mit dem gegebenen Index (wie ein Tipp auf den Graphen).
 Future<void> _pickDuration(WidgetTester tester, int index) async {
-  final data = tester.widget<LineChart>(find.byType(LineChart).first).data;
+  final data = tester.widget<LineChart>(find.byType(LineChart).last).data; // Leistungskurve steht ganz unten
   final bar = data.lineBarsData.first;
   data.lineTouchData.touchCallback!(
     FlTapUpEvent(TapUpDetails(kind: PointerDeviceKind.touch)),
@@ -122,6 +131,7 @@ void main() {
 
   testWidgets('Dauer waehlen hebt den Abschnitt in den Graphen und auf der Karte hervor', (tester) async {
     await _load(tester, _screen());
+    await _single(tester);
     await _pickDuration(tester, 2); // 5 min
     await tester.pump(const Duration(milliseconds: 100));
     expect(find.textContaining('Beste 5 min: 320 W, von 5:00 bis 10:00'), findsOneWidget);
@@ -135,6 +145,7 @@ void main() {
 
   testWidgets('Runden: Tabelle, Auswahl hebt die Runde hervor und zoomt', (tester) async {
     await _load(tester, _screen());
+    await _single(tester);
     expect(find.text('Runden'), findsOneWidget);
     expect(find.text('2500 m'), findsNothing);
     expect(find.text('2,50 km'), findsNWidgets(2));
@@ -163,10 +174,11 @@ void main() {
 
   testWidgets('Zoom zeigt in den Diagrammen nur den Abschnitt und laesst sich zuruecknehmen', (tester) async {
     await _load(tester, _screen());
+    await _single(tester);
     expect(find.text('Auf Abschnitt zoomen'), findsNothing); // ohne Auswahl kein Zoom
     await _pickDuration(tester, 2); // 5 min
     await tester.pump(const Duration(milliseconds: 100));
-    List<LineChartData> datas() => tester.widgetList<LineChart>(find.byType(LineChart)).skip(1).map((c) => c.data).toList(); // ohne Leistungskurve
+    List<LineChartData> datas() => _charts(tester).map((c) => c.data).toList(); // ohne Leistungskurve
     expect(datas().where((d) => d.minX == 3.0), isEmpty);
     await tester.tap(find.text('Auf Abschnitt zoomen'));
     await tester.pump(const Duration(milliseconds: 100));
@@ -184,7 +196,8 @@ void main() {
 
   testWidgets('Gezoomt werden die Daten des Ausschnitts in hoher Aufloesung nachgeladen', (tester) async {
     await _load(tester, _screen());
-    int points() => tester.widgetList<LineChart>(find.byType(LineChart)).skip(1).first.data.lineBarsData.first.spots.length;
+    await _single(tester);
+    int points() => _charts(tester).first.data.lineBarsData.first.spots.length;
     expect(points(), 20); // ganze Fahrt: grob
     await _pickDuration(tester, 2);
     await tester.pump(const Duration(milliseconds: 100));
@@ -195,7 +208,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400));
     await tester.pump(const Duration(milliseconds: 100));
     expect(points(), greaterThan(coarse * 5));
-    final spots = tester.widgetList<LineChart>(find.byType(LineChart)).skip(1).first.data.lineBarsData.first.spots;
+    final spots = _charts(tester).first.data.lineBarsData.first.spots;
     expect(spots.any((p) => p.y == 900), isTrue); // die Spitze ist jetzt sichtbar
     await tester.tap(find.text('Ganze Fahrt zeigen'));
     await tester.pump(const Duration(milliseconds: 100));
@@ -205,7 +218,8 @@ void main() {
 
   testWidgets('Allgemeiner Zoom: Hineinzoomen, Verschieben und Zuruecksetzen wirken auf alle Diagramme', (tester) async {
     await _load(tester, _screen());
-    List<LineChartData> datas() => tester.widgetList<LineChart>(find.byType(LineChart)).skip(1).map((c) => c.data).toList(); // ohne Leistungskurve
+    await _single(tester);
+    List<LineChartData> datas() => _charts(tester).map((c) => c.data).toList(); // ohne Leistungskurve
     expect(find.text('Zoom: ganze Fahrt'), findsOneWidget);
     await tester.tap(find.byTooltip('Hineinzoomen'));
     await tester.pump(const Duration(milliseconds: 100));
@@ -227,7 +241,8 @@ void main() {
 
   testWidgets('Mausrad zoomt zum Mauszeiger', (tester) async {
     await _load(tester, _screen());
-    final rect = tester.getRect(find.byType(LineChart).at(1));
+    await _single(tester);
+    final rect = tester.getRect(find.byType(LineChart).first);
     final mouse = TestPointer(1, PointerDeviceKind.mouse);
     await tester.sendEventToBinding(mouse.hover(Offset(rect.left + 42, rect.center.dy))); // ganz links in der Zeichenflaeche
     await tester.sendEventToBinding(mouse.scroll(const Offset(0, -100)));
@@ -240,7 +255,7 @@ void main() {
 
   testWidgets('Zwei Finger zoomen, Ziehen mit der Maus verschiebt', (tester) async {
     await _load(tester, _screen());
-    final c = tester.getCenter(find.byType(LineChart).at(1));
+    final c = tester.getCenter(find.byType(LineChart).first);
     final g1 = await tester.startGesture(c + const Offset(-80, 0), pointer: 1);
     final g2 = await tester.startGesture(c + const Offset(80, 0), pointer: 2);
     await g1.moveBy(const Offset(-30, 0)); // Finger spreizen = hineinzoomen
@@ -260,18 +275,21 @@ void main() {
 
   testWidgets('Kombinierte Ansicht: Reihen waehlbar, Zoom gilt weiter, Einzelansicht bleibt moeglich', (tester) async {
     await _load(tester, _screen());
+    expect(find.text('Alle Daten in einem Diagramm'), findsOneWidget); // Standardansicht
+    expect(find.byType(LineChart), findsNWidgets(2));
+    await _single(tester);
     expect(find.text('Alle Daten in einem Diagramm'), findsNothing);
     await tester.tap(find.text('Kombiniert'));
     await tester.pump(const Duration(milliseconds: 100));
     expect(find.text('Alle Daten in einem Diagramm'), findsOneWidget);
     expect(find.byType(LineChart), findsNWidgets(2)); // Leistungskurve + ein kombiniertes Diagramm, keine Einzeldiagramme
-    LineChartData combined() => tester.widgetList<LineChart>(find.byType(LineChart)).elementAt(1).data;
+    LineChartData combined() => tester.widgetList<LineChart>(find.byType(LineChart)).first.data;
     expect(combined().lineBarsData.length, 4);
     expect(find.textContaining('Berühre oder fahre mit der Maus'), findsOneWidget);
     final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
     await mouse.addPointer(location: Offset.zero);
     addTearDown(mouse.removePointer);
-    final c = tester.getCenter(find.byType(LineChart).at(1));
+    final c = tester.getCenter(find.byType(LineChart).first);
     await mouse.moveTo(c);
     await tester.pump(const Duration(milliseconds: 100));
     await mouse.moveTo(c + const Offset(6, 0));

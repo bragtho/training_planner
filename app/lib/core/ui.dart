@@ -596,7 +596,7 @@ String greeting([DateTime? now]) {
   return 'Guten Abend';
 }
 
-/// Logo aus Verlaufskachel mit Fahrrad, optional mit Namen.
+/// App-Icon (aus tool/make_icons.py), optional mit Namen.
 class AppLogo extends StatelessWidget {
   const AppLogo({super.key, this.showName = false, this.size = 40});
   final bool showName;
@@ -604,38 +604,18 @@ class AppLogo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final mark = Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(size * 0.3),
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [AppColors.brand, AppColors.accent],
-        ),
-      ),
-      child: Icon(Icons.directions_bike_rounded, color: Colors.white, size: size * 0.58),
-    );
+    final mark = Image.asset('assets/logo.png', width: size, height: size, filterQuality: FilterQuality.medium);
     if (!showName) return mark;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         mark,
         const SizedBox(width: Gap.md),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Training',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800, height: 1),
-            ),
-            Text(
-              'Planner',
-              style: Theme.of(context).textTheme.titleMedium
-                  ?.copyWith(fontWeight: FontWeight.w800, height: 1.1, color: Theme.of(context).colorScheme.primary),
-            ),
-          ],
+        Text.rich(
+          const TextSpan(text: 'Watt', children: [
+            TextSpan(text: 'lab', style: TextStyle(color: AppColors.accent)),
+          ]),
+          style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800, letterSpacing: -0.4),
         ),
       ],
     );

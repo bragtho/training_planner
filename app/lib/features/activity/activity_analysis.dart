@@ -167,7 +167,7 @@ class _FeedbackViewState extends State<_FeedbackView> {
     final improvements = [for (final p in (fb['improvements'] as List? ?? const [])) p.toString()];
     final ftpHint = (fb['ftp_hint'] as String? ?? '').trim();
     final race = analysis['race'] == true;
-    final accent = race ? const Color(0xFFA855F7) : AppColors.brand;
+    final accent = race ? const Color(0xFFA855F7) : t.colorScheme.primary;
 
     Widget point(IconData icon, Color c, String s) => Padding(
           padding: const EdgeInsets.only(top: Gap.sm),

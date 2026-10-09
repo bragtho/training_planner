@@ -198,7 +198,7 @@ class _HeroPanel extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xFF064E3B), AppColors.brandDeep, Color(0xFF1E3A8A)],
+          colors: [Color(0xFF0B1730), AppColors.brand, Color(0xFF1E3A8A)],
         ),
       ),
       padding: const EdgeInsets.all(56),
@@ -206,7 +206,7 @@ class _HeroPanel extends StatelessWidget {
         Row(children: [
           const AppLogo(size: 44),
           const SizedBox(width: Gap.md),
-          Text('Training Planner', style: t.textTheme.titleLarge?.copyWith(color: Colors.white)),
+          Text('Wattlab', style: t.textTheme.titleLarge?.copyWith(color: Colors.white)),
         ]),
         const Spacer(),
         Text('Trainiere smarter,\nnicht nur härter.',

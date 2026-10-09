@@ -140,7 +140,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     onChanged: (_) => setState(() {}),
                     decoration: const InputDecoration(
                       labelText: 'Server-Adresse',
-                      helperText: 'z. B. http://192.168.0.45:8000',
+                      helperText: 'z. B. http://100.x.y.z:8000 (Tailscale) oder http://192.168.0.45:8000',
                     ),
                   ),
                 ],

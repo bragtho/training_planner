@@ -7,6 +7,15 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 String get apiBaseUrl {
   const fromEnv = String.fromEnvironment('API_URL');
   if (fromEnv.isNotEmpty) return fromEnv;
+  if (kIsWeb) {
+    // Web-App ueber Tailscale/LAN geoeffnet: Backend liegt auf demselben Rechner.
+    final host = Uri.base.host;
+    if (host.isNotEmpty && host != 'localhost' && host != '127.0.0.1') {
+      return Uri.base.scheme == 'https'
+          ? Uri.base.origin // z. B. `tailscale serve` mit HTTPS
+          : 'http://$host:8000';
+    }
+  }
   if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
     return 'http://10.0.2.2:8000'; // Android-Emulator -> Host-PC
   }

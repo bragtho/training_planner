@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../features/activity/activity_screen.dart';
 import '../features/auth/login_screen.dart';
+import '../features/bests/bests_screen.dart';
 import '../features/calendar/calendar_screen.dart';
 import '../features/calendar/workout_detail.dart';
 import '../features/calendar/workout_editor.dart';
@@ -33,6 +34,7 @@ final routerProvider = Provider<GoRouter>((ref) {
     routes: [
       GoRoute(path: '/login', builder: (_, _) => const LoginScreen()),
       GoRoute(path: '/season', builder: (_, _) => const SeasonScreen()),
+      GoRoute(path: '/bests', builder: (_, _) => const BestsScreen()),
       GoRoute(
         path: '/workout/new',
         builder: (_, state) => WorkoutEditorScreen(

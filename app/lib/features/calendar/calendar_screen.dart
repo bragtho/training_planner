@@ -8,6 +8,7 @@ import '../../core/data.dart';
 import '../../core/sport.dart';
 import '../../core/theme.dart';
 import '../../core/ui.dart';
+import 'workout_editor.dart' show WorkoutProfile;
 
 const _completedColor = AppColors.completed;
 
@@ -31,12 +32,36 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
     return ((lead + days) / 7).ceil();
   }
 
-  void _shift(int months) => setState(() => _month = DateTime(_month.year, _month.month + months));
+  bool _weekView = false;
+  late DateTime _weekStart = _mondayOf(DateTime.now());
+
+  static DateTime _mondayOf(DateTime d) => DateTime(d.year, d.month, d.day - (d.weekday - 1));
+
+  void _shift(int n) => setState(() {
+    if (_weekView) {
+      _weekStart = DateTime(_weekStart.year, _weekStart.month, _weekStart.day + 7 * n);
+    } else {
+      _month = DateTime(_month.year, _month.month + n);
+    }
+  });
+
+  void _setView(bool week) => setState(() {
+    final now = DateTime.now();
+    if (week) {
+      _weekStart = _month.year == now.year && _month.month == now.month ? _mondayOf(now) : _gridStart;
+    } else {
+      final mid = _weekStart.add(const Duration(days: 3)); // Donnerstag bestimmt den Monat
+      _month = DateTime(mid.year, mid.month);
+    }
+    _weekView = week;
+  });
 
   @override
   Widget build(BuildContext context) {
-    final start = _gridStart;
-    final end = DateTime(start.year, start.month, start.day + _weeks * 7 - 1);
+    final start = _weekView ? _weekStart : _gridStart;
+    final end = _weekView
+        ? DateTime(start.year, start.month, start.day + 6)
+        : DateTime(start.year, start.month, start.day + _weeks * 7 - 1);
     final data = ref.watch(calendarProvider((start, end)));
     final value = data.value;
 
@@ -74,7 +99,9 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
     }
 
     final now = DateTime.now();
-    final isCurrent = _month.year == now.year && _month.month == now.month;
+    final isCurrent = _weekView
+        ? _weekStart == _mondayOf(now)
+        : _month.year == now.year && _month.month == now.month;
     return Scaffold(
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => context.push('/workout/new?date=${isoDay(DateTime.now())}'),
@@ -101,27 +128,46 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
                   icon: const Icon(Icons.timeline_rounded, size: 18),
                   label: Text(phone ? 'Saison' : 'Saisonplan'),
                 );
+                final unit = _weekView ? 'Woche' : 'Monat';
                 final prev = IconButton.outlined(
-                  tooltip: 'Voriger Monat',
+                  tooltip: _weekView ? 'Vorherige Woche' : 'Voriger Monat',
                   onPressed: () => _shift(-1),
                   icon: const Icon(Icons.chevron_left_rounded),
                 );
                 final today = OutlinedButton(
-                  onPressed: isCurrent ? null : () => setState(() => _month = DateTime(now.year, now.month)),
+                  onPressed: isCurrent
+                      ? null
+                      : () => setState(() {
+                          _month = DateTime(now.year, now.month);
+                          _weekStart = _mondayOf(now);
+                        }),
                   child: const Text('Heute'),
                 );
                 final next = IconButton.outlined(
-                  tooltip: 'Nächster Monat',
+                  tooltip: 'Nächste${_weekView ? '' : 'r'} $unit',
                   onPressed: () => _shift(1),
                   icon: const Icon(Icons.chevron_right_rounded),
                 );
-                final title = DateFormat('MMMM yyyy', 'de').format(_month);
+                final title = _weekView
+                    ? '${DateFormat('d. MMM', 'de').format(start)} – ${DateFormat('d. MMM yyyy', 'de').format(end)}'
+                    : DateFormat('MMMM yyyy', 'de').format(_month);
+                final mode = SegmentedButton<bool>(
+                  showSelectedIcon: false,
+                  segments: const [
+                    ButtonSegment(value: false, label: Text('Monat')),
+                    ButtonSegment(value: true, label: Text('Woche')),
+                  ],
+                  selected: {_weekView},
+                  onSelectionChanged: (s) => _setView(s.first),
+                );
                 if (!phone) {
                   return PageHeader(
                     subtitle: 'Kalender',
                     title: title,
                     trailing: [
                       ?loading,
+                      mode,
+                      const SizedBox(width: Gap.sm),
                       season,
                       const SizedBox(width: Gap.sm),
                       prev,
@@ -135,6 +181,7 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
                 // Handy: Monat in einer Zeile, Bedienelemente darunter
                 return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                   PageHeader(subtitle: 'Kalender', title: title, trailing: [?loading]),
+                  Padding(padding: const EdgeInsets.only(bottom: Gap.sm), child: mode),
                   Padding(
                     padding: const EdgeInsets.only(bottom: Gap.md),
                     child: Row(children: [
@@ -159,6 +206,8 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
                           onRetry: () => ref.invalidate(calendarProvider),
                         ),
                       )
+                    : _weekView
+                    ? _WeekList(start: start, workouts: workouts, loose: loose)
                     : LayoutBuilder(
                         builder: (context, c) {
                           final narrow = c.maxWidth < 600;
@@ -225,6 +274,164 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Wochenansicht: Tage untereinander, je Training Profil-Graph und Kennzahlen.
+class _WeekList extends StatelessWidget {
+  const _WeekList({required this.start, required this.workouts, required this.loose});
+  final DateTime start;
+  final Map<String, List<Json>> workouts;
+  final Map<String, List<Json>> loose;
+
+  @override
+  Widget build(BuildContext context) {
+    final line = Theme.of(context).colorScheme.outlineVariant;
+    return ListView(
+      padding: const EdgeInsets.only(bottom: Gap.lg),
+      children: [
+        for (var d = 0; d < 7; d++) ...[
+          if (d > 0) Divider(height: Gap.xl, color: line),
+          _dayRow(context, DateTime(start.year, start.month, start.day + d)),
+        ],
+      ],
+    );
+  }
+
+  /// Ein Tag = eine Zeile: links Datum, rechts Trainings oder ein deutlicher Leer-Eintrag.
+  Widget _dayRow(BuildContext context, DateTime day) {
+    final t = Theme.of(context);
+    final key = isoDay(day);
+    final ws = workouts[key] ?? const <Json>[];
+    final acts = loose[key] ?? const <Json>[];
+    final isToday = _day(DateTime.now()) == day;
+    final muted = t.colorScheme.onSurfaceVariant;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: DateBadge(date: day, color: isToday ? t.colorScheme.primary : muted),
+        ),
+        const SizedBox(width: Gap.md),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (isToday)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 2),
+                  child: Text('Heute', style: t.textTheme.labelMedium?.copyWith(color: t.colorScheme.primary)),
+                ),
+              if (ws.isEmpty && acts.isEmpty)
+                InkWell(
+                  borderRadius: BorderRadius.circular(Radii.md),
+                  onTap: () => context.push('/workout/new?date=$key'),
+                  child: Container(
+                    height: 52,
+                    padding: const EdgeInsets.symmetric(horizontal: Gap.md),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(Radii.md),
+                      border: Border.all(color: t.colorScheme.outlineVariant),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.bedtime_outlined, size: 18, color: muted),
+                        const SizedBox(width: Gap.sm),
+                        Expanded(child: Text('Ruhetag, nichts geplant', style: t.textTheme.bodyMedium?.copyWith(color: muted))),
+                        Icon(Icons.add_rounded, color: muted),
+                      ],
+                    ),
+                  ),
+                ),
+              for (final w in ws) _WorkoutCard(w: w),
+              for (final a in acts)
+                SurfaceCard(
+                  onTap: () => context.push('/activity/${a['id']}'),
+                  child: Row(
+                    children: [
+                      Icon(sportInfo(a['sport'] as String?).icon, color: _completedColor),
+                      const SizedBox(width: Gap.md),
+                      Expanded(
+                        child: Text(
+                          a['name'] as String? ?? sportInfo(a['sport'] as String?).label,
+                          style: t.textTheme.titleSmall,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      Text(
+                        [formatDuration(a['duration_s'] as num), if (a['tss'] != null) '${(a['tss'] as num).round()} TSS'].join(' · '),
+                        style: t.textTheme.bodySmall?.copyWith(color: muted),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _WorkoutCard extends StatelessWidget {
+  const _WorkoutCard({required this.w});
+  final Json w;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context);
+    final color = _statusColor(context, w['status'] as String);
+    final done = w['status'] == 'completed';
+    final st = w['structure'] as List?;
+    final profile = w['kind'] != 'strength' && st != null && st.isNotEmpty
+        ? [for (final s in st) Map<String, dynamic>.from(s as Map)]
+        : null;
+    final tss = (done ? w['actual_tss'] : w['planned_tss']) as num?;
+    final dur = w['planned_duration_s'];
+    return SurfaceCard(
+      onTap: () => context.push('/workout/${w['id']}'),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Icon(
+                done
+                    ? Icons.check_circle_rounded
+                    : w['kind'] == 'strength'
+                    ? Icons.fitness_center_rounded
+                    : Icons.event_note_rounded,
+                color: color,
+              ),
+              const SizedBox(width: Gap.sm),
+              Expanded(
+                child: Text(
+                  w['title'] as String,
+                  style: t.textTheme.titleSmall?.copyWith(
+                    decoration: w['status'] == 'skipped' ? TextDecoration.lineThrough : null,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              Text(_DaySheet._labels[w['status']] ?? '', style: t.textTheme.labelMedium?.copyWith(color: color)),
+            ],
+          ),
+          if (profile != null) ...[
+            const SizedBox(height: Gap.sm),
+            SizedBox(height: 56, child: WorkoutProfile(structure: profile, mini: true)),
+          ],
+          const SizedBox(height: Gap.sm),
+          Text(
+            [
+              if (dur != null) formatDuration(dur as num),
+              if (tss != null) '${tss.round()} TSS${done ? '' : ' geplant'}',
+            ].join(' · '),
+            style: t.textTheme.bodySmall?.copyWith(color: t.colorScheme.onSurfaceVariant),
+          ),
+        ],
       ),
     );
   }

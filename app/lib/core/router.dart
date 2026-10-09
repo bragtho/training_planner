@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../features/activity/activity_screen.dart';
 import '../features/auth/login_screen.dart';
 import '../features/calendar/calendar_screen.dart';
+import '../features/calendar/workout_detail.dart';
 import '../features/calendar/workout_editor.dart';
 import '../features/coach/coach_screen.dart';
 import '../features/dashboard/dashboard_screen.dart';
@@ -40,6 +41,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: '/workout/:id',
+        builder: (_, state) => WorkoutDetailScreen(id: int.parse(state.pathParameters['id']!)),
+      ),
+      GoRoute(
+        path: '/workout/:id/edit',
         builder: (_, state) => WorkoutEditorScreen(id: int.parse(state.pathParameters['id']!)),
       ),
       GoRoute(
